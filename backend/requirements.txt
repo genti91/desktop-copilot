@@ -1,0 +1,9 @@
+chromadb
+edge-tts
+fastapi
+google-genai
+groq
+notion-client
+python-dotenv
+python-multipart
+uvicorn[standard]
