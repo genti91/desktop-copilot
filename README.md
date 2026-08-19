@@ -12,9 +12,7 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
 ## Foto del hardware
 
 
-```md
-![Desktop Co-Pilot](https://raw.githubusercontent.com/genti91/desktop-copilot/refs/heads/main/images/IMG_6478.gif)
-```
+<img src="./images/IMG_6478.gif" width="500" alt="Desktop Co-Pilot">
 
 ## Que hace hoy
 
