@@ -13,7 +13,7 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
 
 
 ```md
-![Desktop Co-Pilot](images/IMG_6478.gif)
+![Desktop Co-Pilot](https://raw.githubusercontent.com/genti91/desktop-copilot/refs/heads/main/images/IMG_6478.gif)
 ```
 
 ## Que hace hoy
