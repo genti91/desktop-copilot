@@ -1,8 +1,10 @@
 #include "display.h"
+#include "device_config.h"
 
 namespace {
 constexpr uint16_t FACE_COLOR = TFT_WHITE;
 volatile FaceMode currentFaceMode = FACE_IDLE;
+volatile bool displayPowered = true;
 
 void drawEye(int centerX, int centerY, int width, int height) {
   if (height < 4) height = 4;
@@ -80,6 +82,8 @@ void drawSpeakingFace(uint32_t now) {
 }
 
 void renderFace(FaceMode mode, uint32_t now) {
+  if (!displayPowered) return;
+
   faceCanvas.fillSprite(TFT_BLACK);
 
   switch (mode) {
@@ -122,6 +126,12 @@ void configModeCallback(WiFiManager* wifiManager) {
 
 void setFaceMode(FaceMode mode) {
   currentFaceMode = mode;
+}
+
+void setDisplayPower(bool enabled) {
+  pinMode(PIN_TFT_BL, OUTPUT);
+  displayPowered = enabled;
+  digitalWrite(PIN_TFT_BL, enabled ? HIGH : LOW);
 }
 
 void faceAnimationTask(void* parameter) {

@@ -20,5 +20,6 @@ enum FaceMode {
 };
 
 void configModeCallback(WiFiManager* wifiManager);
+void setDisplayPower(bool enabled);
 void setFaceMode(FaceMode mode);
 void faceAnimationTask(void* parameter);

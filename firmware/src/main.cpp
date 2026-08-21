@@ -22,6 +22,7 @@ void setup() {
   initDeviceOutputs();
 
   tft.init();
+  setDisplayPower(true);
   tft.setRotation(3);
   tft.fillScreen(TFT_RED);
   delay(200);
@@ -102,6 +103,7 @@ void loop() {
   if (digitalRead(TOUCH_PIN) == HIGH) {
     delay(50);
     if (digitalRead(TOUCH_PIN) == HIGH) {
+      wakeDeviceOutputs();
       recordWhileTouched();
       while (digitalRead(TOUCH_PIN) == HIGH) delay(10);
     }

@@ -2,6 +2,7 @@
 #include <Adafruit_NeoPixel.h>
 #include "commands.h"
 #include "device_config.h"
+#include "display.h"
 
 namespace {
 uint8_t currentRed = 255;
@@ -17,6 +18,13 @@ void initDeviceOutputs() {
   rgbLed.begin();
   rgbLed.setBrightness(70);
   rgbLed.setPixelColor(0, rgbLed.Color(255, 42, 0));
+  rgbLed.show();
+}
+
+void wakeDeviceOutputs() {
+  digitalWrite(PIN_LED, HIGH);
+  setDisplayPower(true);
+  rgbLed.setPixelColor(0, rgbLed.Color(currentRed, currentGreen, currentBlue));
   rgbLed.show();
 }
 
@@ -57,6 +65,12 @@ void executeDeviceCommand(String command) {
     } else if (singleCommand == "FILAMENT_OFF") {
       digitalWrite(PIN_LED, LOW);
       Serial.println("💡 Filamento APAGADO");
+    } else if (singleCommand == "ALL_OFF" || singleCommand == "DISPLAY_OFF" || singleCommand == "POWER_OFF") {
+      digitalWrite(PIN_LED, LOW);
+      rgbLed.setPixelColor(0, 0);
+      rgbLed.show();
+      setDisplayPower(false);
+      Serial.println("🌙 LEDs y display APAGADOS");
     }
 
     startIndex = pipeIndex + 1;

@@ -82,6 +82,7 @@ async def voice_assistant(
     - Brillo NeoPixel: usa [CMD:LED_BRIGHTNESS:V] (V de 0 a 255).
     - Encender Filamento: usa [CMD:FILAMENT_ON].
     - Apagar Filamento: usa [CMD:FILAMENT_OFF].
+    - Apagar todos los LEDs y el display: usa [CMD:ALL_OFF]. La próxima vez que se toque el botón de voz, todo volverá a encenderse.
     Si no te pide interactuar con las luces, no incluyas ningún [CMD:].
 
     [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]

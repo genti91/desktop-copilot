@@ -10,6 +10,7 @@
 #define I2S_DIN 3
 #define PIN_RGB D4
 #define PIN_LED D5
+#define PIN_TFT_BL D6
 #define NUMPIXELS 1
 
 #define SAMPLE_RATE 16000
