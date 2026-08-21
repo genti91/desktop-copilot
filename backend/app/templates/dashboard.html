@@ -13,12 +13,15 @@
         textarea { width: 100%; height: 120px; background: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 5px; padding: 10px; font-size: 14px; box-sizing: border-box; margin-bottom: 15px; resize: vertical; }
         button { background: #89b4fa; color: #11111b; border: 0; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; }
         button:hover { background: #74c7ec; }
+        .subtitle { text-align: center; font-size: 14px; margin-top: 0; }
+        a { color: #89b4fa; }
         .status { margin-top: 10px; min-height: 20px; font-size: 14px; color: #a6e3a1; font-weight: bold; }
     </style>
 </head>
 <body>
     <main class="container">
         <h1>Configuración del Asistente</h1>
+        <p class="subtitle"><a href="/device">Configurar el dispositivo ESP32 (luces, imágenes y firmware)</a></p>
         <h2>Modificar Personalidad</h2>
         <textarea id="personalityText">__PERSONALITY__</textarea>
         <button type="button" onclick="updatePersonality()">Guardar Personalidad</button>

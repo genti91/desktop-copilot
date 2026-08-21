@@ -1,3 +1,4 @@
+#include <LittleFS.h>
 #include "display.h"
 #include "device_config.h"
 
@@ -5,6 +6,9 @@ namespace {
 constexpr uint16_t FACE_COLOR = TFT_WHITE;
 volatile FaceMode currentFaceMode = FACE_IDLE;
 volatile bool displayPowered = true;
+uint16_t* idleImage = nullptr;
+volatile bool idleImageReady = false;
+volatile bool idleImageDrawn = false;
 
 void drawEye(int centerX, int centerY, int width, int height) {
   if (height < 4) height = 4;
@@ -84,6 +88,16 @@ void drawSpeakingFace(uint32_t now) {
 void renderFace(FaceMode mode, uint32_t now) {
   if (!displayPowered) return;
 
+  if (mode == FACE_IDLE && idleImageReady && idleImage) {
+    if (!idleImageDrawn) {
+      tft.setSwapBytes(true);
+      tft.pushImage(0, 0, SCREEN_W, SCREEN_H, idleImage);
+      idleImageDrawn = true;
+    }
+    return;
+  }
+  idleImageDrawn = false;
+
   faceCanvas.fillSprite(TFT_BLACK);
 
   switch (mode) {
@@ -130,8 +144,58 @@ void setFaceMode(FaceMode mode) {
 
 void setDisplayPower(bool enabled) {
   pinMode(PIN_TFT_BL, OUTPUT);
+  if (enabled && !displayPowered) idleImageDrawn = false;
   displayPowered = enabled;
   digitalWrite(PIN_TFT_BL, enabled ? HIGH : LOW);
+}
+
+bool loadIdleImage(const char* path) {
+  File imageFile = LittleFS.open(path, "r");
+  if (!imageFile) {
+    Serial.printf("⚠️ No pude abrir la imagen de reposo (%s).\n", path);
+    return false;
+  }
+  if (imageFile.size() != IDLE_IMAGE_BYTES) {
+    Serial.printf("⚠️ Imagen de reposo con tamaño inesperado (%u bytes).\n", (unsigned)imageFile.size());
+    imageFile.close();
+    return false;
+  }
+
+  if (!idleImage) {
+    idleImage = static_cast<uint16_t*>(ps_malloc(IDLE_IMAGE_BYTES));
+    if (!idleImage) idleImage = static_cast<uint16_t*>(malloc(IDLE_IMAGE_BYTES));
+    if (!idleImage) {
+      Serial.println("❌ Sin memoria para la imagen de reposo.");
+      imageFile.close();
+      return false;
+    }
+  }
+
+  // La tarea de la cara corre en el otro núcleo: la dormimos un par de cuadros
+  // antes de reescribir el buffer para no mostrar una imagen a medio cargar.
+  idleImageReady = false;
+  vTaskDelay(pdMS_TO_TICKS(FACE_TASK_DELAY_MS * 3));
+
+  size_t bytesRead = imageFile.read(reinterpret_cast<uint8_t*>(idleImage), IDLE_IMAGE_BYTES);
+  imageFile.close();
+  if (bytesRead != IDLE_IMAGE_BYTES) {
+    Serial.println("⚠️ Lectura incompleta de la imagen de reposo.");
+    return false;
+  }
+
+  idleImageDrawn = false;
+  idleImageReady = true;
+  Serial.println("🖼️ Imagen de reposo cargada.");
+  return true;
+}
+
+void clearIdleImage() {
+  idleImageReady = false;
+  idleImageDrawn = false;
+}
+
+bool hasIdleImage() {
+  return idleImageReady;
 }
 
 void faceAnimationTask(void* parameter) {
