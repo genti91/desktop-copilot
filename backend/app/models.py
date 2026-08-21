@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,3 +38,46 @@ class NotesPayload(BaseModel):
 
 class PersonalityPayload(BaseModel):
     personality_text: str
+
+
+class DeviceImage(BaseModel):
+    id: str
+    label: str
+    source: Literal["default", "upload"]
+    preview_url: str
+    raw_url: str
+    checksum: str
+
+
+class DeviceConfig(BaseModel):
+    revision: int = 1
+    rgb_enabled: bool = True
+    rgb_color: str = "#FF2A00"
+    rgb_brightness: int = Field(default=70, ge=0, le=255)
+    filament_enabled: bool = True
+    display_enabled: bool = True
+    image_id: Optional[str] = None
+    updated_at: str = ""
+
+
+class DeviceConfigUpdate(BaseModel):
+    """Actualización parcial: sólo se aplican los campos presentes."""
+
+    rgb_enabled: Optional[bool] = None
+    rgb_color: Optional[str] = None
+    rgb_brightness: Optional[int] = Field(default=None, ge=0, le=255)
+    filament_enabled: Optional[bool] = None
+    display_enabled: Optional[bool] = None
+    image_id: Optional[str] = None
+    clear_image: bool = False
+
+
+class FirmwareManifest(BaseModel):
+    available: bool = False
+    version: str = "0.0.0"
+    build: int = 0
+    url: Optional[str] = None
+    sha256: Optional[str] = None
+    size: int = 0
+    notes: str = ""
+    uploaded_at: str = ""

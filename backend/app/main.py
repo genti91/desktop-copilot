@@ -8,12 +8,14 @@ from fastapi.responses import HTMLResponse, Response
 from google.genai import types
 
 from .config import APP_TITLE, FAST_GENAI_CONFIG, MAX_HISTORY_MESSAGES
+from .device import router as device_router
 from .integrations import collection, generate_speech_bytes, gemini, groq
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
 from .services import extract_and_save_data, process_meeting_storage
 from .state import sessions, state_memory
 
 app = FastAPI(title=APP_TITLE)
+app.include_router(device_router)
 DASHBOARD_TEMPLATE = Path(__file__).parent / "templates" / "dashboard.html"
 
 

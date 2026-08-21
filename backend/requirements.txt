@@ -4,6 +4,7 @@ fastapi
 google-genai
 groq
 notion-client
+pillow
 python-dotenv
 python-multipart
 uvicorn[standard]

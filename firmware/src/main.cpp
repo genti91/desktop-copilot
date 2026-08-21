@@ -6,6 +6,9 @@
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
+#include "ota.h"
+#include "settings.h"
+#include "version.h"
 
 char server_url[128] = "http://192.168.100.99:8000/voice-assistant";
 bool shouldSaveConfig = false;
@@ -18,6 +21,7 @@ void saveConfigCallback() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  Serial.printf("\n🚀 Firmware %s (build %d)\n", FIRMWARE_VERSION, FIRMWARE_BUILD);
 
   initDeviceOutputs();
 
@@ -82,7 +86,12 @@ void setup() {
     }
   }
 
+  // Antes de arrancar nada más: si el backend publicó un build mayor, el ESP32
+  // se actualiza y reinicia desde acá.
+  checkForFirmwareUpdate();
+
   initAudio();
+  initDeviceSettings();
 
   xTaskCreatePinnedToCore(
     faceAnimationTask,
@@ -94,11 +103,16 @@ void setup() {
     FACE_TASK_CORE
   );
 
+  // Con la tarea de la cara ya viva, traemos la configuración actual del backend
+  // (colores, encendidos e imagen de reposo).
+  refreshDeviceSettings(true);
+
   Serial.println("\n✅ SISTEMA LISTO. Mantén presionado el sensor Touch para hablar.");
 }
 
 void loop() {
   updateAudioPlayback();
+  if (!mp3->isRunning()) updateDeviceSettings();
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
     delay(50);

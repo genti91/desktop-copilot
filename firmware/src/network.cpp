@@ -9,6 +9,16 @@
 
 extern char server_url[128];
 
+String backendBaseUrl() {
+  String url = String(server_url);
+  url.trim();
+  if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
+
+  int schemeEnd = url.indexOf("://") + 3;
+  int pathStart = url.indexOf('/', schemeEnd);
+  return pathStart > 0 ? url.substring(0, pathStart) : url;
+}
+
 void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("❌ Sin conexión Wi-Fi.");
