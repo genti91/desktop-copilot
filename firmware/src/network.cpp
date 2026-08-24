@@ -139,18 +139,31 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   // writeToStream decodifica el chunked si lo hubiera.
   int written = http.writeToStream(&responseFile);
-  size_t fileSize = responseFile.size();
+  responseFile.flush();
   responseFile.close();
 
   String action = http.header("X-Action");
   http.end();
   backendUnlock();
 
-  if (written < 0 || fileSize == 0) {
-    Serial.printf("❌ Respuesta vacía o incompleta (%d).\n", written);
+  if (written <= 0) {
+    Serial.printf("❌ No llegó cuerpo en la respuesta (%d).\n", written);
     setFaceMode(FACE_IDLE);
     return;
   }
+
+  // El tamaño hay que leerlo con el archivo ya cerrado: en modo escritura,
+  // File::size() devuelve el que tenía al abrirlo, o sea cero.
+  File savedResponse = LittleFS.open(RESPONSE_PATH, "r");
+  size_t fileSize = savedResponse ? savedResponse.size() : 0;
+  if (savedResponse) savedResponse.close();
+
+  if (fileSize == 0) {
+    Serial.println("❌ El MP3 quedó vacío en flash.");
+    setFaceMode(FACE_IDLE);
+    return;
+  }
+  Serial.printf("⬇️ %u bytes recibidos.\n", (unsigned)fileSize);
 
   if (action.length() > 0) executeDeviceCommand(action);
   startPlayback();
