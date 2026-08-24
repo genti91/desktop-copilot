@@ -86,6 +86,72 @@ void dumpAt(File& saved, const char* label, size_t offset) {
                 zeros == read ? " (todo ceros)" : "");
 }
 
+// Recorre el MP3 frame por frame. Mirar tres muestras sueltas no alcanza para
+// saber si el archivo esta intacto: esto camina la cadena entera y dice hasta
+// donde llega, que es exactamente lo que hace el decodificador antes de rendirse.
+void walkMp3Frames(File& saved, size_t fileSize) {
+  static const uint16_t BITRATE_MPEG1[16] =
+    {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0};
+  static const uint16_t BITRATE_MPEG2[16] =
+    {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0};
+  static const uint32_t RATE_MPEG1[4] = {44100, 48000, 32000, 0};
+  static const uint32_t RATE_MPEG2[4] = {22050, 24000, 16000, 0};
+  static const uint32_t RATE_MPEG25[4] = {11025, 12000, 8000, 0};
+
+  size_t offset = 0;
+  uint32_t frames = 0;
+  uint32_t totalMs = 0;
+  uint32_t firstRate = 0;
+  uint16_t firstBitrate = 0;
+
+  while (offset + 4 <= fileSize) {
+    uint8_t header[4];
+    saved.seek(offset);
+    if (saved.read(header, 4) != 4) break;
+
+    if (header[0] != 0xFF || (header[1] & 0xE0) != 0xE0) break;
+
+    uint8_t versionBits = (header[1] >> 3) & 0x03;
+    uint8_t layerBits = (header[1] >> 1) & 0x03;
+    if (versionBits == 1 || layerBits != 1) break;  // reservado, o no es Layer III
+
+    bool isMpeg1 = versionBits == 3;
+    uint8_t bitrateIndex = (header[2] >> 4) & 0x0F;
+    uint8_t rateIndex = (header[2] >> 2) & 0x03;
+    uint8_t padding = (header[2] >> 1) & 0x01;
+
+    uint16_t bitrate = isMpeg1 ? BITRATE_MPEG1[bitrateIndex] : BITRATE_MPEG2[bitrateIndex];
+    uint32_t rate = isMpeg1 ? RATE_MPEG1[rateIndex]
+                            : (versionBits == 2 ? RATE_MPEG2[rateIndex] : RATE_MPEG25[rateIndex]);
+    if (bitrate == 0 || rate == 0) break;
+
+    // Layer III: 1152 muestras por frame en MPEG1, 576 en MPEG2/2.5.
+    uint32_t samples = isMpeg1 ? 1152 : 576;
+    size_t frameSize = (samples / 8) * bitrate * 1000 / rate + padding;
+    if (frameSize < 4) break;
+
+    if (frames == 0) {
+      firstRate = rate;
+      firstBitrate = bitrate;
+    }
+    frames++;
+    totalMs += samples * 1000 / rate;
+    offset += frameSize;
+  }
+
+  Serial.printf("   %lu frames, %lu kbps, %lu Hz, %lu ms de audio\n",
+                (unsigned long)frames, (unsigned long)firstBitrate,
+                (unsigned long)firstRate, (unsigned long)totalMs);
+
+  if (offset >= fileSize) {
+    Serial.println("   cadena de frames completa: el MP3 esta intacto");
+  } else {
+    Serial.printf("   ⚠️ la cadena se corta en el offset %u de %u (%.1f%%)\n",
+                  (unsigned)offset, (unsigned)fileSize,
+                  fileSize ? (100.0 * offset / fileSize) : 0.0);
+  }
+}
+
 void inspectSavedResponse(File& saved, size_t fileSize) {
   Serial.printf("⬇️ %u bytes | heap libre %u | mayor bloque %u\n",
                 (unsigned)fileSize, (unsigned)ESP.getFreeHeap(),
@@ -96,24 +162,7 @@ void inspectSavedResponse(File& saved, size_t fileSize) {
   if (fileSize > 32) dumpAt(saved, "final", fileSize - 16);
   saved.seek(0);
 
-  // Dónde aparece el primer sync, para distinguir "basura al principio" de
-  // "no es un MP3 en absoluto".
-  saved.seek(0);
-  int32_t syncOffset = -1;
-  uint8_t previous = 0;
-  for (int32_t offset = 0; offset < static_cast<int32_t>(fileSize) && offset < 4096; offset++) {
-    int value = saved.read();
-    if (value < 0) break;
-    if (previous == 0xFF && (value & 0xE0) == 0xE0) {
-      syncOffset = offset - 1;
-      break;
-    }
-    previous = static_cast<uint8_t>(value);
-  }
-  if (syncOffset == 0) Serial.println("   frame sync en el offset 0: el MP3 se ve bien");
-  else if (syncOffset > 0) Serial.printf("   frame sync recién en el offset %d\n", (int)syncOffset);
-  else Serial.println("   sin frame sync en los primeros 4 KB: no es un MP3");
-
+  walkMp3Frames(saved, fileSize);
   saved.seek(0);
 }
 
