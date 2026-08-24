@@ -69,19 +69,32 @@ size_t buildMultipartBody(size_t recordedPcmBytes) {
 // Un MP3 de edge-tts empieza en un frame sync (0xFF 0xFB/0xF3) o en un tag ID3.
 // Si lo que quedó en flash arranca con otra cosa, el decodificador aborta sin
 // emitir nada y este volcado dice exactamente con qué.
-void inspectSavedResponse(File& saved, size_t fileSize) {
-  uint8_t head[16] = {0};
-  size_t read = saved.read(head, sizeof(head));
+void dumpAt(File& saved, const char* label, size_t offset) {
+  uint8_t bytes[16] = {0};
+  saved.seek(offset);
+  size_t read = saved.read(bytes, sizeof(bytes));
 
   String hex;
-  String ascii;
+  size_t zeros = 0;
   for (size_t index = 0; index < read; index++) {
     char pair[4];
-    snprintf(pair, sizeof(pair), "%02x ", head[index]);
+    snprintf(pair, sizeof(pair), "%02x ", bytes[index]);
     hex += pair;
-    ascii += (head[index] >= 32 && head[index] < 127) ? static_cast<char>(head[index]) : '.';
+    if (bytes[index] == 0) zeros++;
   }
-  Serial.printf("⬇️ %u bytes | %s| %s\n", (unsigned)fileSize, hex.c_str(), ascii.c_str());
+  Serial.printf("   %-6s @%-7u %s%s\n", label, (unsigned)offset, hex.c_str(),
+                zeros == read ? " (todo ceros)" : "");
+}
+
+void inspectSavedResponse(File& saved, size_t fileSize) {
+  Serial.printf("⬇️ %u bytes | heap libre %u | mayor bloque %u\n",
+                (unsigned)fileSize, (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+
+  dumpAt(saved, "inicio", 0);
+  if (fileSize > 64) dumpAt(saved, "medio", fileSize / 2);
+  if (fileSize > 32) dumpAt(saved, "final", fileSize - 16);
+  saved.seek(0);
 
   // Dónde aparece el primer sync, para distinguir "basura al principio" de
   // "no es un MP3 en absoluto".
@@ -109,8 +122,9 @@ void startPlayback(size_t fileSize) {
   file = new AudioFileSourceLittleFS(RESPONSE_PATH);
   bool started = mp3->begin(file, out);
   playbackStartedMs = millis();
-  Serial.printf("🔊 Reproduciendo %u bytes (begin=%s).\n",
-                (unsigned)fileSize, started ? "ok" : "FALLÓ");
+  Serial.printf("🔊 Reproduciendo %u bytes (begin=%s, fuente=%s, ve %u bytes).\n",
+                (unsigned)fileSize, started ? "ok" : "FALLÓ",
+                file->isOpen() ? "abierta" : "CERRADA", (unsigned)file->getSize());
   if (!started) setFaceMode(FACE_IDLE);
 }
 
@@ -185,6 +199,9 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   String action = http.header("X-Action");
   http.end();
+  // Antes de decodificar: libera el contexto TLS para no tenerlo en heap
+  // mientras libmad trabaja.
+  backendDisconnect();
 
   if (written <= 0) {
     Serial.printf("❌ No llegó cuerpo en la respuesta (%d).\n", written);

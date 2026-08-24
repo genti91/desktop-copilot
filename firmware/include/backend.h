@@ -31,6 +31,11 @@ void initBackend();
 bool backendLock(uint32_t timeoutMs);
 void backendUnlock();
 
+// Cierra el socket y, con TLS, libera el contexto de mbedtls. HTTPClient no
+// siempre lo hace: si el servidor ya cerró la conexión, se saltea el stop() y
+// el contexto queda ocupando decenas de KB de heap.
+void backendDisconnect();
+
 // Abre un pedido con HTTPClient sobre ese transporte, ya con X-Device-Token.
 bool beginBackendRequest(HTTPClient& http, const String& url);
 

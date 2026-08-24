@@ -3,7 +3,10 @@
 #include "backend.h"
 
 char server_url[SERVER_URL_SIZE] = "https://octopi.taile9bb1c.ts.net/voice-assistant";
-char device_token[DEVICE_TOKEN_SIZE] = "aTkXMckk02CF6hmA24Nhc5NEzQGCtpam";
+// Vacio a proposito: el token es un secreto y este repo es publico. Se carga
+// desde /config.txt, que se completa una vez desde el portal cautivo y
+// sobrevive a los flasheos porque LittleFS no se borra al subir firmware.
+char device_token[DEVICE_TOKEN_SIZE] = "";
 
 namespace {
 
@@ -123,6 +126,11 @@ bool backendLock(uint32_t timeoutMs) {
 
 void backendUnlock() {
   if (backendMutex != NULL) xSemaphoreGive(backendMutex);
+}
+
+void backendDisconnect() {
+  plainClient.stop();
+  secureClient.stop();
 }
 
 void writeDeviceTokenHeader(WiFiClient& client) {

@@ -81,6 +81,8 @@ void setup() {
   // se actualiza y reinicia desde acá.
   checkForFirmwareUpdate();
 
+  //wifiManager.resetSettings();  // para que no se quede guardado el portal cautivo
+
   initAudio();
   initDeviceSettings();
 
