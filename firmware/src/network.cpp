@@ -2,22 +2,11 @@
 #include <WiFi.h>
 #include <LittleFS.h>
 #include "audio.h"
+#include "backend.h"
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
 #include "network.h"
-
-extern char server_url[128];
-
-String backendBaseUrl() {
-  String url = String(server_url);
-  url.trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
-
-  int schemeEnd = url.indexOf("://") + 3;
-  int pathStart = url.indexOf('/', schemeEnd);
-  return pathStart > 0 ? url.substring(0, pathStart) : url;
-}
 
 void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -33,16 +22,14 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     file = NULL;
   }
 
-  String url = String(server_url);
-  url.replace("http://", "");
-  int colonIndex = url.indexOf(':');
-  int slashIndex = url.indexOf('/');
-  String host = url.substring(0, colonIndex);
-  int port = url.substring(colonIndex + 1, slashIndex).toInt();
-  String path = url.substring(slashIndex);
+  String host = backendHost();
+  uint16_t port = backendPort();
+  String path = backendPath();
 
-  WiFiClient client;
-  Serial.printf("📡 Conectando a %s:%d...\n", host.c_str(), port);
+  // Plano en la LAN, TLS cuando la URL es el https:// de Tailscale Funnel.
+  WiFiClient& client = backendTransport();
+  Serial.printf("📡 Conectando a %s:%u (%s)...\n", host.c_str(), port,
+                backendUsesTls() ? "TLS" : "sin cifrar");
   if (!client.connect(host.c_str(), port)) {
     Serial.println("❌ Error al conectar con FastAPI.");
     setFaceMode(FACE_IDLE);
@@ -63,10 +50,16 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   header.chunkSize = 36 + recordedPcmBytes;
   size_t contentLength = bodyStart.length() + sizeof(WavHeader) + recordedPcmBytes + bodyEnd.length();
 
+  // El puerto sólo va en Host si no es el que corresponde al esquema.
+  bool defaultPort = port == (backendUsesTls() ? 443 : 80);
+  String hostHeader = defaultPort ? host : host + ":" + String(port);
+
   client.printf("POST %s HTTP/1.1\r\n", path.c_str());
-  client.printf("Host: %s:%d\r\n", host.c_str(), port);
+  client.printf("Host: %s\r\n", hostHeader.c_str());
   client.println("User-Agent: ESP32S3");
   client.println("Connection: close");
+  // Fuera de la LAN el backend exige este token para atender al dispositivo.
+  writeDeviceTokenHeader(client);
   client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary.c_str());
   client.printf("Content-Length: %d\r\n\r\n", contentLength);
   client.print(bodyStart);

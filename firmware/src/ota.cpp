@@ -5,8 +5,8 @@
 #include <WiFi.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/version.h>
+#include "backend.h"
 #include "display.h"
-#include "network.h"
 #include "ota.h"
 #include "version.h"
 
@@ -58,7 +58,7 @@ String toHex(const uint8_t* digest, size_t length) {
 bool downloadAndFlash(const String& binaryUrl, const String& expectedSha256) {
   HTTPClient http;
   http.setTimeout(15000);
-  if (!http.begin(binaryUrl)) return false;
+  if (!beginBackendRequest(http, binaryUrl)) return false;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {
@@ -153,7 +153,7 @@ void checkForFirmwareUpdate() {
   String baseUrl = backendBaseUrl();
   HTTPClient http;
   http.setTimeout(5000);
-  if (!http.begin(baseUrl + "/ota/manifest")) return;
+  if (!beginBackendRequest(http, baseUrl + "/ota/manifest")) return;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {

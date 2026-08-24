@@ -3,9 +3,9 @@
 #include <HTTPClient.h>
 #include <LittleFS.h>
 #include <WiFi.h>
+#include "backend.h"
 #include "commands.h"
 #include "display.h"
-#include "network.h"
 #include "settings.h"
 
 namespace {
@@ -84,7 +84,7 @@ bool restoreSettings() {
 bool downloadIdleImage(const String& imageUrl) {
   HTTPClient http;
   http.setTimeout(10000);
-  if (!http.begin(imageUrl)) return false;
+  if (!beginBackendRequest(http, imageUrl)) return false;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {
@@ -180,7 +180,7 @@ bool refreshDeviceSettings(bool force) {
   String baseUrl = backendBaseUrl();
   HTTPClient http;
   http.setTimeout(4000);
-  if (!http.begin(baseUrl + "/device/config")) return false;
+  if (!beginBackendRequest(http, baseUrl + "/device/config")) return false;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {
