@@ -12,7 +12,21 @@ constexpr uint32_t MAINTENANCE_TICK_MS = 500;
 // El handshake TLS de mbedtls necesita bastante pila, y por acá tambien pasa el
 // OTA, que escribe flash mientras calcula el SHA-256.
 constexpr uint32_t MAINTENANCE_STACK_BYTES = 16384;
-constexpr BaseType_t MAINTENANCE_CORE = 0;
+
+// Va en el mismo núcleo que loop(), no en el de la animación.
+//
+// El núcleo 0 ya tiene faceTask redibujando 240x240 cada 15 ms, y sólo el IDLE
+// del núcleo 0 está vigilado por el task watchdog (5 s, con panic). Un handshake
+// TLS es CPU pura y no cede: puesto ahí, entre las dos tareas dejaban al IDLE0
+// sin correr y el watchdog reiniciaba la placa.
+//
+// En el núcleo 1 comparte tiempo con loopTask, las dos en prioridad 1, así que
+// FreeRTOS las alterna por tick y el sensor táctil se sigue leyendo.
+#ifdef ARDUINO_RUNNING_CORE
+constexpr BaseType_t MAINTENANCE_CORE = ARDUINO_RUNNING_CORE;
+#else
+constexpr BaseType_t MAINTENANCE_CORE = 1;
+#endif
 
 bool interactionInProgress() {
   // Mientras el usuario habla o el asistente contesta, la red queda para eso.

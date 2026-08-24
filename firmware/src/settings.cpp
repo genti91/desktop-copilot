@@ -128,7 +128,7 @@ bool downloadIdleImage(const String& imageUrl) {
 
   if (total != IDLE_IMAGE_BYTES) {
     Serial.printf("⚠️ Descarga incompleta de la imagen (%u/%u bytes).\n", (unsigned)total, (unsigned)IDLE_IMAGE_BYTES);
-    LittleFS.remove(IDLE_IMAGE_PATH);
+    if (LittleFS.exists(IDLE_IMAGE_PATH)) LittleFS.remove(IDLE_IMAGE_PATH);
     return false;
   }
   return true;
@@ -140,7 +140,7 @@ void applyImage(JsonVariantConst image, const String& baseUrl) {
       Serial.println("🖼️ Sin imagen seleccionada: vuelve la cara animada.");
     }
     clearIdleImage();
-    LittleFS.remove(IDLE_IMAGE_PATH);
+    if (LittleFS.exists(IDLE_IMAGE_PATH)) LittleFS.remove(IDLE_IMAGE_PATH);
     settings.imageChecksum = "";
     return;
   }
@@ -174,6 +174,7 @@ void initDeviceSettings() {
 }
 
 bool refreshDeviceSettings(bool force) {
+  lastPollMs = millis();
   backendReachable = false;
   if (WiFi.status() != WL_CONNECTED) return false;
 
