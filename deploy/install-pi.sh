@@ -28,11 +28,28 @@ die() { printf '\033[1;31m[x] %s\033[0m\n' "$1" >&2; exit 1; }
 [ "$(id -u)" -ne 0 ] || die "No lo corras como root. Usá tu usuario normal; el script pide sudo cuando hace falta."
 command -v systemctl >/dev/null || die "Esto espera un sistema con systemd (Raspberry Pi OS / OctoPi)."
 
+# Si sudo pide password interactiva no podemos usarlo (por ejemplo corriendo por
+# SSH sin TTY). En ese caso hacemos todo lo demás y dejamos anotado lo que falta.
+HAVE_SUDO=1
+sudo -n true 2>/dev/null || HAVE_SUDO=0
+
 # --------------------------------------------------------------------------- #
 
-say "Dependencias del sistema"
-sudo apt-get update -qq
-sudo apt-get install -y git python3-venv python3-dev build-essential
+MISSING_PACKAGES=()
+for package in git python3-venv python3-dev build-essential; do
+  dpkg -s "$package" >/dev/null 2>&1 || MISSING_PACKAGES+=("$package")
+done
+
+if [ ${#MISSING_PACKAGES[@]} -eq 0 ]; then
+  say "Dependencias del sistema: ya estaban todas"
+elif [ "$HAVE_SUDO" -eq 1 ]; then
+  say "Dependencias del sistema"
+  sudo apt-get update -qq
+  sudo apt-get install -y "${MISSING_PACKAGES[@]}"
+else
+  die "Faltan paquetes y sudo pide password. Corré primero:
+    sudo apt-get install -y ${MISSING_PACKAGES[*]}"
+fi
 
 # --------------------------------------------------------------------------- #
 
@@ -92,12 +109,29 @@ UNIT_TEMPLATE="$INSTALL_DIR/deploy/$SERVICE_NAME.service"
 [ -f "$UNIT_TEMPLATE" ] || die "No encontré $UNIT_TEMPLATE"
 
 # La plantilla viene con el usuario 'pi'; la ajustamos a quien esté instalando.
+GENERATED_UNIT="$(mktemp)"
 sed -e "s|^User=.*|User=$RUN_USER|" \
     -e "s|^Group=.*|Group=$RUN_GROUP|" \
     -e "s|^WorkingDirectory=.*|WorkingDirectory=$BACKEND_DIR|" \
     -e "s|^ExecStart=.*|ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT|" \
-    "$UNIT_TEMPLATE" | sudo tee "/etc/systemd/system/$SERVICE_NAME.service" >/dev/null
+    "$UNIT_TEMPLATE" > "$GENERATED_UNIT"
 
+if [ "$HAVE_SUDO" -eq 0 ]; then
+  warn "sudo pide password, asi que no puedo instalar el servicio."
+  echo "Ya quedo todo lo demas listo. Corré estos tres comandos para terminar:"
+  cat <<PENDIENTE
+
+  sudo cp $GENERATED_UNIT /etc/systemd/system/$SERVICE_NAME.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now $SERVICE_NAME
+
+PENDIENTE
+  echo "Y verificá con:  curl -s localhost:$PORT/health"
+  exit 0
+fi
+
+sudo cp "$GENERATED_UNIT" "/etc/systemd/system/$SERVICE_NAME.service"
+rm -f "$GENERATED_UNIT"
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME" >/dev/null
 sudo systemctl restart "$SERVICE_NAME"
