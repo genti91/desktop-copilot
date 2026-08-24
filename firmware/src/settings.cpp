@@ -222,7 +222,10 @@ void updateDeviceSettings() {
   lastPollMs = now;
 
   refreshDeviceSettings(false);
-  // Con el backend caído cada intento bloquea el loop hasta el timeout, así que
-  // espaciamos los reintentos para no comerle respuesta al sensor touch.
-  pollIntervalMs = backendReachable ? SETTINGS_POLL_INTERVAL_MS : SETTINGS_RETRY_INTERVAL_MS;
+  if (!backendReachable) {
+    pollIntervalMs = SETTINGS_RETRY_INTERVAL_MS;
+  } else {
+    pollIntervalMs = backendUsesTls() ? SETTINGS_REMOTE_POLL_INTERVAL_MS
+                                      : SETTINGS_POLL_INTERVAL_MS;
+  }
 }

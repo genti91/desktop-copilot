@@ -7,6 +7,7 @@
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
+#include "maintenance.h"
 #include "ota.h"
 #include "settings.h"
 #include "version.h"
@@ -24,6 +25,7 @@ void setup() {
   delay(500);
   Serial.printf("\n🚀 Firmware %s (build %d)\n", FIRMWARE_VERSION, FIRMWARE_BUILD);
 
+  initBackend();
   initDeviceOutputs();
 
   tft.init();
@@ -96,15 +98,15 @@ void setup() {
   // (colores, encendidos e imagen de reposo).
   refreshDeviceSettings(true);
 
+  // El sondeo y el OTA pasan a su propia tarea: en loop() bloqueaban la
+  // lectura del sensor tactil y la reproduccion del audio.
+  startMaintenanceTask();
+
   Serial.println("\n✅ SISTEMA LISTO. Mantén presionado el sensor Touch para hablar.");
 }
 
 void loop() {
   updateAudioPlayback();
-  if (!mp3->isRunning()) {
-    updateDeviceSettings();
-    updateFirmwareCheck();
-  }
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
     delay(50);

@@ -1,12 +1,79 @@
 #include <Arduino.h>
-#include <WiFi.h>
+#include <HTTPClient.h>
 #include <LittleFS.h>
+#include <WiFi.h>
 #include "audio.h"
 #include "backend.h"
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
 #include "network.h"
+
+namespace {
+
+constexpr const char* RESPONSE_PATH = "/response.mp3";
+constexpr const char* BOUNDARY = "----ESP32Boundary987654321";
+constexpr uint32_t REQUEST_TIMEOUT_MS = 20000;
+// Espera máxima por el lock si la tarea de mantenimiento está usando la red.
+constexpr uint32_t NETWORK_LOCK_WAIT_MS = 8000;
+
+// El cuerpo multipart se arma entero en PSRAM. Antes se escribía a mano sobre el
+// socket, pero la respuesta también se parseaba a mano, y eso no sobrevive a un
+// proxy que responde con Transfer-Encoding: chunked (Tailscale Funnel lo hace):
+// las cabeceras de cada chunk terminaban dentro del MP3. Con HTTPClient el
+// framing lo resuelve la librería.
+uint8_t* requestBuffer = NULL;
+size_t requestCapacity = 0;
+
+bool ensureRequestBuffer(size_t needed) {
+  if (requestBuffer != NULL && requestCapacity >= needed) return true;
+  if (requestBuffer != NULL) free(requestBuffer);
+
+  requestBuffer = static_cast<uint8_t*>(ps_malloc(needed));
+  if (requestBuffer == NULL) requestBuffer = static_cast<uint8_t*>(malloc(needed));
+  requestCapacity = requestBuffer != NULL ? needed : 0;
+
+  if (requestBuffer == NULL) Serial.println("❌ Sin memoria para el cuerpo del pedido.");
+  return requestBuffer != NULL;
+}
+
+size_t buildMultipartBody(size_t recordedPcmBytes) {
+  String head = String("--") + BOUNDARY + "\r\n";
+  head += "Content-Disposition: form-data; name=\"session_id\"\r\n\r\n";
+  head += "esp32_session\r\n";
+  head += String("--") + BOUNDARY + "\r\n";
+  head += "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n";
+  head += "Content-Type: audio/wav\r\n\r\n";
+  String tail = String("\r\n--") + BOUNDARY + "--\r\n";
+
+  WavHeader header;
+  header.subchunk2Size = recordedPcmBytes;
+  header.chunkSize = 36 + recordedPcmBytes;
+
+  size_t total = head.length() + sizeof(WavHeader) + recordedPcmBytes + tail.length();
+  if (!ensureRequestBuffer(total)) return 0;
+
+  size_t offset = 0;
+  memcpy(requestBuffer + offset, head.c_str(), head.length());
+  offset += head.length();
+  memcpy(requestBuffer + offset, &header, sizeof(WavHeader));
+  offset += sizeof(WavHeader);
+  memcpy(requestBuffer + offset, pcm_buffer, recordedPcmBytes);
+  offset += recordedPcmBytes;
+  memcpy(requestBuffer + offset, tail.c_str(), tail.length());
+  offset += tail.length();
+
+  return offset;
+}
+
+void startPlayback() {
+  Serial.println("🔊 Respuesta guardada en flash. Reproduciendo...");
+  setFaceMode(FACE_SPEAKING);
+  file = new AudioFileSourceLittleFS(RESPONSE_PATH);
+  mp3->begin(file, out);
+}
+
+}  // namespace
 
 void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -22,88 +89,69 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     file = NULL;
   }
 
-  String host = backendHost();
-  uint16_t port = backendPort();
-  String path = backendPath();
-
-  // Plano en la LAN, TLS cuando la URL es el https:// de Tailscale Funnel.
-  WiFiClient& client = backendTransport();
-  Serial.printf("📡 Conectando a %s:%u (%s)...\n", host.c_str(), port,
-                backendUsesTls() ? "TLS" : "sin cifrar");
-  if (!client.connect(host.c_str(), port)) {
-    Serial.println("❌ Error al conectar con FastAPI.");
+  size_t bodyLength = buildMultipartBody(recordedPcmBytes);
+  if (bodyLength == 0) {
     setFaceMode(FACE_IDLE);
     return;
   }
 
-  String boundary = "----ESP32Boundary987654321";
-  String bodyStart = "--" + boundary + "\r\n";
-  bodyStart += "Content-Disposition: form-data; name=\"session_id\"\r\n\r\n";
-  bodyStart += "esp32_session\r\n";
-  bodyStart += "--" + boundary + "\r\n";
-  bodyStart += "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n";
-  bodyStart += "Content-Type: audio/wav\r\n\r\n";
-  String bodyEnd = "\r\n--" + boundary + "--\r\n";
-
-  WavHeader header;
-  header.subchunk2Size = recordedPcmBytes;
-  header.chunkSize = 36 + recordedPcmBytes;
-  size_t contentLength = bodyStart.length() + sizeof(WavHeader) + recordedPcmBytes + bodyEnd.length();
-
-  // El puerto sólo va en Host si no es el que corresponde al esquema.
-  bool defaultPort = port == (backendUsesTls() ? 443 : 80);
-  String hostHeader = defaultPort ? host : host + ":" + String(port);
-
-  client.printf("POST %s HTTP/1.1\r\n", path.c_str());
-  client.printf("Host: %s\r\n", hostHeader.c_str());
-  client.println("User-Agent: ESP32S3");
-  client.println("Connection: close");
-  // Fuera de la LAN el backend exige este token para atender al dispositivo.
-  writeDeviceTokenHeader(client);
-  client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary.c_str());
-  client.printf("Content-Length: %d\r\n\r\n", contentLength);
-  client.print(bodyStart);
-  client.write((uint8_t*)&header, sizeof(WavHeader));
-
-  constexpr size_t uploadChunkSize = 4096;
-  for (size_t offset = 0; offset < recordedPcmBytes; offset += uploadChunkSize) {
-    size_t length = min(uploadChunkSize, recordedPcmBytes - offset);
-    client.write(pcm_buffer + offset, length);
+  if (!backendLock(NETWORK_LOCK_WAIT_MS)) {
+    Serial.println("❌ La red quedó ocupada demasiado tiempo.");
+    setFaceMode(FACE_IDLE);
+    return;
   }
 
-  client.print(bodyEnd);
-  Serial.println("📡 Audio enviado a FastAPI. Esperando respuesta...");
+  HTTPClient http;
+  http.setTimeout(REQUEST_TIMEOUT_MS);
+  http.setReuse(false);
 
-  unsigned long timeout = millis();
-  while (client.connected() && !client.available()) {
-    if (millis() - timeout > 15000) {
-      Serial.println("❌ Timeout esperando la respuesta del servidor.");
-      client.stop();
-      setFaceMode(FACE_IDLE);
-      return;
-    }
-    delay(10);
+  Serial.printf("📡 Enviando %u bytes a %s (%s)...\n", (unsigned)bodyLength,
+                backendHost().c_str(), backendUsesTls() ? "TLS" : "sin cifrar");
+
+  if (!beginBackendRequest(http, String(server_url))) {
+    Serial.println("❌ Error al preparar el pedido.");
+    backendUnlock();
+    setFaceMode(FACE_IDLE);
+    return;
   }
 
-  bool isBody = false;
-  File responseFile = LittleFS.open("/response.mp3", "w");
-  while (client.connected() || client.available()) {
-    if (!isBody) {
-      String line = client.readStringUntil('\n');
-      line.trim();
-      if (line.startsWith("x-action: ")) executeDeviceCommand(line.substring(10));
-      if (line.length() == 0) isBody = true;
-    } else {
-      uint8_t buffer[512];
-      size_t length = client.read(buffer, sizeof(buffer));
-      if (length > 0 && responseFile) responseFile.write(buffer, length);
-    }
+  http.addHeader("Content-Type", String("multipart/form-data; boundary=") + BOUNDARY);
+  const char* collected[] = {"X-Action"};
+  http.collectHeaders(collected, 1);
+
+  int status = http.sendRequest("POST", requestBuffer, bodyLength);
+  if (status != HTTP_CODE_OK) {
+    Serial.printf("❌ El backend respondió %d.\n", status);
+    http.end();
+    backendUnlock();
+    setFaceMode(FACE_IDLE);
+    return;
   }
 
-  if (responseFile) responseFile.close();
-  client.stop();
-  Serial.println("🔊 Respuesta guardada en flash (/response.mp3). Reproduciendo...");
-  setFaceMode(FACE_SPEAKING);
-  file = new AudioFileSourceLittleFS("/response.mp3");
-  mp3->begin(file, out);
+  File responseFile = LittleFS.open(RESPONSE_PATH, "w");
+  if (!responseFile) {
+    Serial.println("❌ No pude abrir /response.mp3 para escribir.");
+    http.end();
+    backendUnlock();
+    setFaceMode(FACE_IDLE);
+    return;
+  }
+
+  // writeToStream decodifica el chunked si lo hubiera.
+  int written = http.writeToStream(&responseFile);
+  size_t fileSize = responseFile.size();
+  responseFile.close();
+
+  String action = http.header("X-Action");
+  http.end();
+  backendUnlock();
+
+  if (written < 0 || fileSize == 0) {
+    Serial.printf("❌ Respuesta vacía o incompleta (%d).\n", written);
+    setFaceMode(FACE_IDLE);
+    return;
+  }
+
+  if (action.length() > 0) executeDeviceCommand(action);
+  startPlayback();
 }

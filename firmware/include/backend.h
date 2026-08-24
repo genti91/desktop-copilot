@@ -24,6 +24,13 @@ String backendBaseUrl();
 // CA de Let's Encrypt, que es quien firma los certificados de Funnel.
 WiFiClient& backendTransport();
 
+// El transporte es compartido, y la tarea de mantenimiento corre en paralelo al
+// bucle que manda el audio. Hay que tomar el lock antes de usar la red.
+// timeoutMs == 0 devuelve false en vez de esperar.
+void initBackend();
+bool backendLock(uint32_t timeoutMs);
+void backendUnlock();
+
 // Abre un pedido con HTTPClient sobre ese transporte, ya con X-Device-Token.
 bool beginBackendRequest(HTTPClient& http, const String& url);
 

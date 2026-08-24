@@ -2,8 +2,8 @@
 #include <WiFiClientSecure.h>
 #include "backend.h"
 
-char server_url[SERVER_URL_SIZE] = "http://192.168.100.52:8000/voice-assistant";
-char device_token[DEVICE_TOKEN_SIZE] = "";
+char server_url[SERVER_URL_SIZE] = "https://octopi.taile9bb1c.ts.net/voice-assistant";
+char device_token[DEVICE_TOKEN_SIZE] = "aTkXMckk02CF6hmA24Nhc5NEzQGCtpam";
 
 namespace {
 
@@ -47,6 +47,7 @@ const char LETSENCRYPT_ROOT_CA[] PROGMEM =
 WiFiClient plainClient;
 WiFiClientSecure secureClient;
 bool secureClientReady = false;
+SemaphoreHandle_t backendMutex = NULL;
 
 String normalizedUrl() {
   String url = String(server_url);
@@ -108,6 +109,20 @@ WiFiClient& backendTransport() {
     secureClientReady = true;
   }
   return secureClient;
+}
+
+void initBackend() {
+  if (backendMutex == NULL) backendMutex = xSemaphoreCreateMutex();
+}
+
+bool backendLock(uint32_t timeoutMs) {
+  if (backendMutex == NULL) return true;  // todavía no hay tareas compitiendo
+  TickType_t ticks = timeoutMs == portMAX_DELAY ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs);
+  return xSemaphoreTake(backendMutex, ticks) == pdTRUE;
+}
+
+void backendUnlock() {
+  if (backendMutex != NULL) xSemaphoreGive(backendMutex);
 }
 
 void writeDeviceTokenHeader(WiFiClient& client) {
