@@ -66,6 +66,44 @@ size_t buildMultipartBody(size_t recordedPcmBytes) {
   return offset;
 }
 
+// Un MP3 de edge-tts empieza en un frame sync (0xFF 0xFB/0xF3) o en un tag ID3.
+// Si lo que quedó en flash arranca con otra cosa, el decodificador aborta sin
+// emitir nada y este volcado dice exactamente con qué.
+void inspectSavedResponse(File& saved, size_t fileSize) {
+  uint8_t head[16] = {0};
+  size_t read = saved.read(head, sizeof(head));
+
+  String hex;
+  String ascii;
+  for (size_t index = 0; index < read; index++) {
+    char pair[4];
+    snprintf(pair, sizeof(pair), "%02x ", head[index]);
+    hex += pair;
+    ascii += (head[index] >= 32 && head[index] < 127) ? static_cast<char>(head[index]) : '.';
+  }
+  Serial.printf("⬇️ %u bytes | %s| %s\n", (unsigned)fileSize, hex.c_str(), ascii.c_str());
+
+  // Dónde aparece el primer sync, para distinguir "basura al principio" de
+  // "no es un MP3 en absoluto".
+  saved.seek(0);
+  int32_t syncOffset = -1;
+  uint8_t previous = 0;
+  for (int32_t offset = 0; offset < static_cast<int32_t>(fileSize) && offset < 4096; offset++) {
+    int value = saved.read();
+    if (value < 0) break;
+    if (previous == 0xFF && (value & 0xE0) == 0xE0) {
+      syncOffset = offset - 1;
+      break;
+    }
+    previous = static_cast<uint8_t>(value);
+  }
+  if (syncOffset == 0) Serial.println("   frame sync en el offset 0: el MP3 se ve bien");
+  else if (syncOffset > 0) Serial.printf("   frame sync recién en el offset %d\n", (int)syncOffset);
+  else Serial.println("   sin frame sync en los primeros 4 KB: no es un MP3");
+
+  saved.seek(0);
+}
+
 void startPlayback(size_t fileSize) {
   setFaceMode(FACE_SPEAKING);
   file = new AudioFileSourceLittleFS(RESPONSE_PATH);
@@ -159,7 +197,10 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   // File::size() devuelve el que tenía al abrirlo, o sea cero.
   File savedResponse = LittleFS.open(RESPONSE_PATH, "r");
   size_t fileSize = savedResponse ? savedResponse.size() : 0;
-  if (savedResponse) savedResponse.close();
+  if (savedResponse) {
+    inspectSavedResponse(savedResponse, fileSize);
+    savedResponse.close();
+  }
 
   if (fileSize == 0) {
     Serial.println("❌ El MP3 quedó vacío en flash.");
