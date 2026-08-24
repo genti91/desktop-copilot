@@ -109,7 +109,9 @@ UNIT_TEMPLATE="$INSTALL_DIR/deploy/$SERVICE_NAME.service"
 [ -f "$UNIT_TEMPLATE" ] || die "No encontré $UNIT_TEMPLATE"
 
 # La plantilla viene con el usuario 'pi'; la ajustamos a quien esté instalando.
-GENERATED_UNIT="$(mktemp)"
+# Ruta estable en vez de mktemp: si sudo no esta disponible, el usuario tiene que
+# poder copiarlo despues sin que /tmp se lo haya limpiado.
+GENERATED_UNIT="$INSTALL_DIR/deploy/$SERVICE_NAME.generated.service"
 sed -e "s|^User=.*|User=$RUN_USER|" \
     -e "s|^Group=.*|Group=$RUN_GROUP|" \
     -e "s|^WorkingDirectory=.*|WorkingDirectory=$BACKEND_DIR|" \
