@@ -7,6 +7,7 @@ Asistente de escritorio con IA + hardware (ESP32-S3) para:
 - Hablar con el asistente por voz.
 - Controlar luces del hardware desde comandos generados por la IA.
 - Configurar el dispositivo desde la web (luces, pantalla, imagen de reposo) y actualizarlo por OTA.
+- Hostearlo en una Raspberry Pi y entrar desde cualquier lado sin port forwarding.
 
 Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas, y despues consultas contexto cuando lo necesites.
 
@@ -30,7 +31,7 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
   - Reproduce la respuesta TTS del asistente.
   - Ejecuta comandos de luces recibidos en el header HTTP `X-Action`.
   - Sondea la configuracion remota y aplica colores, encendidos e imagen de pantalla.
-  - Se autoactualiza por OTA al arrancar si el backend publico un build mas nuevo.
+  - Se autoactualiza por OTA si el backend publico un build mas nuevo, sin intervencion.
 
 ## Estado actual
 
@@ -45,7 +46,8 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
   - Color y brillo del NeoPixel.
   - Imagen de reposo elegida del catalogo (extraido de `Imagenes.pdf`) o subida propia.
   - Publicacion de firmware para OTA.
-- Actualizacion OTA verificada por SHA-256, con barra de progreso en la pantalla.
+- Actualizacion OTA automatica: push a `main` -> GitHub Actions compila y publica -> el backend
+  lo espeja -> el ESP32 se actualiza solo (al arrancar o cada 15 min en reposo), verificando SHA-256.
 - Trabajo en progreso: keyword spotting para iniciar grabacion sin tocar boton/sensor.
 
 ## Arquitectura
@@ -66,11 +68,14 @@ ESP32
 
 ```text
 desktop-copilot/
+|- .github/
+|  |- workflows/firmware.yml     # compila y publica el firmware en cada push
+|  \- scripts/firmware_manifest.py
 |- Imagenes.pdf           # laminas de origen para las imagenes de pantalla
 |- backend/
 |  |- app/
 |  |  |- assets/default_images/  # PNG 240x240 extraidos del PDF
-|  |  \- templates/              # dashboard.html y device.html
+|  |  \- templates/              # layout.html + una plantilla por seccion
 |  |- chroma_db/
 |  |- data/               # config del dispositivo + firmware OTA (no versionado)
 |  |- scripts/
@@ -133,10 +138,16 @@ Levantar servidor:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Paginas web:
+Panel web en `http://127.0.0.1:8000/`, con barra de navegacion y una seccion por tema:
 
-- `http://127.0.0.1:8000/dashboard` - personalidad y notas de reunion.
-- `http://127.0.0.1:8000/device` - luces, pantalla, imagenes y firmware OTA.
+- `/notes` - subir notas de reunion.
+- `/personality` - personalidad del asistente.
+- `/device` - luces, pantalla e imagen de reposo.
+- `/firmware` - publicar firmware para OTA.
+
+`/dashboard` sigue funcionando y redirige a `/notes`.
+
+Si `PANEL_PASSWORD` esta seteada en `backend/.env`, el panel pide login en `/login`.
 
 ### 2) Firmware
 
@@ -171,10 +182,8 @@ En el primer arranque:
   - Devuelve `audio/mpeg` + header `X-Action` para hardware.
 - `POST /update-personality`
   - Permite cambiar personalidad del asistente.
-- `GET /dashboard`
-  - UI simple para gestionar personalidad.
-- `GET /device`
-  - Pagina de configuracion del ESP32 (luces, pantalla, imagenes y OTA).
+- `GET /notes`, `GET /personality`, `GET /device`, `GET /firmware`
+  - Las cuatro secciones del panel. `GET /` y `GET /dashboard` redirigen a `/notes`.
 - `GET /device/config`
   - Vista compacta que sondea el ESP32 cada 5 s. Trae `revision`, estado de cada
     salida, color/brillo del RGB y la imagen activa con su checksum.
@@ -192,6 +201,8 @@ En el primer arranque:
   - Multipart con `file` (firmware.bin), `version`, `build` y `notes`.
 - `GET /ota/download`
   - Binario publicado.
+- `GET /ota/sync` / `POST /ota/sync[?force=true]`
+  - Estado del espejado desde GitHub y disparo manual.
 
 ## Configuracion del dispositivo
 
@@ -216,15 +227,74 @@ Comportamiento de la imagen:
 La configuracion tambien se guarda en el ESP32 (`/settings.json` en LittleFS), asi
 que el dispositivo arranca con el ultimo estado conocido aunque el backend este caido.
 
-## Actualizacion OTA
+## Actualizacion OTA automatica
 
-1. Subir `FIRMWARE_BUILD` (y `FIRMWARE_VERSION`) en `firmware/include/version.h`.
-2. Compilar: `pio run -e xiao_esp32s3`.
-3. Publicar `firmware/.pio/build/xiao_esp32s3/firmware.bin` desde `/device`,
-   indicando la misma version y build.
-4. Reiniciar el ESP32. En el setup consulta `/ota/manifest`, y si el `build` remoto
-   es mayor descarga el binario, verifica el SHA-256 y se reinicia con el firmware nuevo.
-   Si el hash no coincide, aborta y sigue con el firmware actual.
+El flujo completo, sin pasos manuales:
+
+```text
+editas firmware/ y haces push a main
+  -> GitHub Actions compila y publica un release (fw-<version>-<build>)
+  -> el backend detecta el release, verifica el SHA-256 y lo publica en /ota/manifest
+  -> el ESP32 consulta el manifest (al arrancar y cada 15 min en reposo)
+  -> si el build remoto es mayor: descarga, revalida el SHA-256 y reinicia
+```
+
+GitHub Actions no puede alcanzar el backend porque vive en la LAN, asi que el
+backend es el que va a buscar: cada 5 minutos consulta los releases del repo.
+
+### El numero de build sube solo
+
+`FIRMWARE_BUILD` sale de `git rev-list --count HEAD`, inyectado por
+`firmware/scripts/build_number.py` tanto en local como en CI. No hay que editarlo.
+Como local y CI calculan lo mismo para un commit dado, un firmware que flasheas
+por USB no queda "viejo" y el ESP32 no lo pisa; recien se actualiza cuando CI
+compila un commit posterior.
+
+`FIRMWARE_VERSION` en `firmware/include/version.h` si es manual: es el numero
+semantico que se muestra en pantalla y nombra el release.
+
+### Configuracion del espejado
+
+En `backend/.env`:
+
+```env
+FIRMWARE_REPO=genti91/desktop-copilot
+# FIRMWARE_AUTO_SYNC=1              # 0 para desactivar el chequeo automatico
+# FIRMWARE_SYNC_INTERVAL_SECONDS=300
+# GITHUB_TOKEN=                     # solo para repos privados o limites de rate
+```
+
+Desde `/firmware` se ve el estado del ultimo chequeo y hay botones para
+buscar ahora o forzar una reinstalacion.
+
+### Publicar a mano
+
+Sigue disponible como alternativa: compilar con `pio run -e xiao_esp32s3` y subir
+`firmware/.pio/build/xiao_esp32s3/firmware.bin` desde `/firmware`, con un build
+mayor al instalado.
 
 La particion `default_8MB.csv` del board ya reserva `app0`/`app1` (3.1 MB cada una),
 asi que no hace falta tocar el esquema de particiones.
+
+## Hostear en una Raspberry Pi
+
+El backend corre en la misma Pi que OctoPrint y se accede desde cualquier lado por
+Tailscale, sin port forwarding (sirve aunque el ISP use CGNAT).
+
+Guia completa: [docs/raspberry-pi.md](docs/raspberry-pi.md). Resumen:
+
+```text
+tu celular / laptop  -> Tailscale -> Raspberry Pi :8000  (panel con password)
+ESP32 (misma casa)   -> IP local de la Pi :8000          (no pasa por el tunel)
+```
+
+El ESP32 se queda en la LAN a proposito: el firmware habla HTTP plano, no tiene
+TLS, asi que una URL `https://` del tunel no le funcionaria.
+
+Instalacion en un comando sobre la Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/genti91/desktop-copilot/main/deploy/install-pi.sh | bash
+```
+
+El service de systemd esta en [deploy/desktop-copilot.service](deploy/desktop-copilot.service).

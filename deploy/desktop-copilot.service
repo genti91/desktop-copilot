@@ -1,0 +1,32 @@
+[Unit]
+Description=Desktop Co-Pilot backend
+Documentation=https://github.com/genti91/desktop-copilot
+# Espera a tener red de verdad: al arrancar consulta GitHub para el sync de firmware.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/desktop-copilot/backend
+
+# Las variables salen de backend/.env, que python-dotenv carga solo.
+# 0.0.0.0 incluye la interfaz de Tailscale, no solo la LAN.
+ExecStart=/home/pi/desktop-copilot/backend/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+Restart=always
+RestartSec=5
+
+# La Pi comparte CPU con OctoPrint: que el backend no le gane prioridad al gcode.
+Nice=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=desktop-copilot
+
+[Install]
+WantedBy=multi-user.target

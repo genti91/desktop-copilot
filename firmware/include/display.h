@@ -25,6 +25,11 @@ void setDisplayPower(bool enabled);
 void setFaceMode(FaceMode mode);
 void faceAnimationTask(void* parameter);
 
+// Congela la animación y espera a que la tarea suelte el TFT, para poder
+// dibujar encima desde otro núcleo (por ejemplo, la pantalla de OTA).
+void pauseFaceAnimation();
+void resumeFaceAnimation();
+
 // Imagen de reposo: se dibuja sólo en FACE_IDLE. En cuanto la cara pasa a
 // grabar/esperar/hablar vuelve la animación, y al volver a FACE_IDLE reaparece.
 bool loadIdleImage(const char* path);
