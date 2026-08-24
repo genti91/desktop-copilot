@@ -9,6 +9,7 @@ uint8_t* pcm_buffer = NULL;
 AudioGeneratorMP3* mp3 = NULL;
 AudioFileSourceLittleFS* file = NULL;
 AudioOutputI2S* out = NULL;
+uint32_t playbackStartedMs = 0;
 
 namespace {
 void initMicrophone() {
@@ -104,12 +105,26 @@ void updateAudioPlayback() {
   if (!mp3->isRunning()) return;
 
   if (!mp3->loop()) {
+    uint32_t elapsed = millis() - playbackStartedMs;
+    uint32_t position = file != NULL ? file->getPos() : 0;
+
+    // Cortarse en los primeros instantes no es un final: es una falla.
+    if (elapsed < 200) {
+      Serial.printf("⚠️ Se cortó a los %lu ms, tras leer %lu bytes del MP3.\n",
+                    (unsigned long)elapsed, (unsigned long)position);
+      if (retryPlayback()) {
+        Serial.println("   reintentando con el mismo archivo...");
+        return;
+      }
+    }
+
     mp3->stop();
     if (file) {
       delete file;
       file = NULL;
     }
-    Serial.println("✅ Reproducción del MP3 finalizada.");
+    Serial.printf("✅ Reproducción finalizada tras %lu ms (leyó %lu bytes).\n",
+                  (unsigned long)elapsed, (unsigned long)position);
     setFaceMode(FACE_IDLE);
   }
 }

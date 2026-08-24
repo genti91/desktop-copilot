@@ -9,6 +9,7 @@ extern uint8_t* pcm_buffer;
 extern AudioGeneratorMP3* mp3;
 extern AudioFileSourceLittleFS* file;
 extern AudioOutputI2S* out;
+extern uint32_t playbackStartedMs;
 
 void initAudio();
 void recordWhileTouched();

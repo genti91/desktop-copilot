@@ -3,14 +3,16 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include "audio.h"
+#include "backend.h"
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
+#include "maintenance.h"
 #include "ota.h"
 #include "settings.h"
 #include "version.h"
 
-char server_url[128] = "http://192.168.100.99:8000/voice-assistant";
+// server_url y device_token viven en backend.cpp.
 bool shouldSaveConfig = false;
 TaskHandle_t faceTaskHandle = NULL;
 
@@ -23,6 +25,7 @@ void setup() {
   delay(500);
   Serial.printf("\n🚀 Firmware %s (build %d)\n", FIRMWARE_VERSION, FIRMWARE_BUILD);
 
+  initBackend();
   initDeviceOutputs();
 
   tft.init();
@@ -42,25 +45,17 @@ void setup() {
     Serial.println("❌ Error al iniciar LittleFS");
   }
 
-  if (LittleFS.exists("/config.txt")) {
-    File configFile = LittleFS.open("/config.txt", "r");
-    if (configFile) {
-      String loadedUrl = configFile.readStringUntil('\n');
-      loadedUrl.trim();
-      if (loadedUrl.length() > 0) {
-        strlcpy(server_url, loadedUrl.c_str(), sizeof(server_url));
-        Serial.printf("📂 URL cargada desde flash: %s\n", server_url);
-      }
-      configFile.close();
-    }
-  }
+  loadBackendConfig();
 
   WiFiManager wifiManager;
   wifiManager.setSaveConfigCallback(saveConfigCallback);
   wifiManager.setAPCallback(configModeCallback);
 
-  WiFiManagerParameter customServerUrl("server", "Server URL", server_url, 128);
+  WiFiManagerParameter customServerUrl("server", "URL del backend", server_url, SERVER_URL_SIZE);
+  // Hace falta sólo cuando el ESP32 sale de la LAN, por ejemplo vía Tailscale Funnel.
+  WiFiManagerParameter customDeviceToken("token", "Token del dispositivo (opcional)", device_token, DEVICE_TOKEN_SIZE);
   wifiManager.addParameter(&customServerUrl);
+  wifiManager.addParameter(&customDeviceToken);
 
   Serial.println("📡 Conectando a Wi-Fi o abriendo portal cautivo...");
   if (!wifiManager.autoConnect("ESP32_Asistente")) {
@@ -78,12 +73,8 @@ void setup() {
 
   if (shouldSaveConfig) {
     strlcpy(server_url, customServerUrl.getValue(), sizeof(server_url));
-    File configFile = LittleFS.open("/config.txt", "w");
-    if (configFile) {
-      configFile.println(server_url);
-      configFile.close();
-      Serial.println("💾 Nueva URL del servidor guardada en LittleFS.");
-    }
+    strlcpy(device_token, customDeviceToken.getValue(), sizeof(device_token));
+    saveBackendConfig();
   }
 
   // Antes de arrancar nada más: si el backend publicó un build mayor, el ESP32
@@ -107,15 +98,15 @@ void setup() {
   // (colores, encendidos e imagen de reposo).
   refreshDeviceSettings(true);
 
+  // El sondeo y el OTA pasan a su propia tarea: en loop() bloqueaban la
+  // lectura del sensor tactil y la reproduccion del audio.
+  startMaintenanceTask();
+
   Serial.println("\n✅ SISTEMA LISTO. Mantén presionado el sensor Touch para hablar.");
 }
 
 void loop() {
   updateAudioPlayback();
-  if (!mp3->isRunning()) {
-    updateDeviceSettings();
-    updateFirmwareCheck();
-  }
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
     delay(50);

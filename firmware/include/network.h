@@ -4,6 +4,6 @@
 
 void sendAudioAndPlayResponse(size_t recordedPcmBytes);
 
-// Origen del backend (esquema + host + puerto) derivado de la URL guardada en
-// /config.txt, para poder pegarle a /device/... y /ota/... sin duplicar config.
-String backendBaseUrl();
+// Vuelve a arrancar la reproduccion del mismo archivo ya guardado, sin tocar la
+// red. Devuelve false si ya se reintento o si no se pudo reabrir.
+bool retryPlayback();

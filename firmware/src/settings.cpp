@@ -3,9 +3,9 @@
 #include <HTTPClient.h>
 #include <LittleFS.h>
 #include <WiFi.h>
+#include "backend.h"
 #include "commands.h"
 #include "display.h"
-#include "network.h"
 #include "settings.h"
 
 namespace {
@@ -84,7 +84,7 @@ bool restoreSettings() {
 bool downloadIdleImage(const String& imageUrl) {
   HTTPClient http;
   http.setTimeout(10000);
-  if (!http.begin(imageUrl)) return false;
+  if (!beginBackendRequest(http, imageUrl)) return false;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {
@@ -128,7 +128,7 @@ bool downloadIdleImage(const String& imageUrl) {
 
   if (total != IDLE_IMAGE_BYTES) {
     Serial.printf("⚠️ Descarga incompleta de la imagen (%u/%u bytes).\n", (unsigned)total, (unsigned)IDLE_IMAGE_BYTES);
-    LittleFS.remove(IDLE_IMAGE_PATH);
+    if (LittleFS.exists(IDLE_IMAGE_PATH)) LittleFS.remove(IDLE_IMAGE_PATH);
     return false;
   }
   return true;
@@ -140,7 +140,7 @@ void applyImage(JsonVariantConst image, const String& baseUrl) {
       Serial.println("🖼️ Sin imagen seleccionada: vuelve la cara animada.");
     }
     clearIdleImage();
-    LittleFS.remove(IDLE_IMAGE_PATH);
+    if (LittleFS.exists(IDLE_IMAGE_PATH)) LittleFS.remove(IDLE_IMAGE_PATH);
     settings.imageChecksum = "";
     return;
   }
@@ -174,13 +174,14 @@ void initDeviceSettings() {
 }
 
 bool refreshDeviceSettings(bool force) {
+  lastPollMs = millis();
   backendReachable = false;
   if (WiFi.status() != WL_CONNECTED) return false;
 
   String baseUrl = backendBaseUrl();
   HTTPClient http;
   http.setTimeout(4000);
-  if (!http.begin(baseUrl + "/device/config")) return false;
+  if (!beginBackendRequest(http, baseUrl + "/device/config")) return false;
 
   int status = http.GET();
   if (status != HTTP_CODE_OK) {
@@ -222,7 +223,10 @@ void updateDeviceSettings() {
   lastPollMs = now;
 
   refreshDeviceSettings(false);
-  // Con el backend caído cada intento bloquea el loop hasta el timeout, así que
-  // espaciamos los reintentos para no comerle respuesta al sensor touch.
-  pollIntervalMs = backendReachable ? SETTINGS_POLL_INTERVAL_MS : SETTINGS_RETRY_INTERVAL_MS;
+  if (!backendReachable) {
+    pollIntervalMs = SETTINGS_RETRY_INTERVAL_MS;
+  } else {
+    pollIntervalMs = backendUsesTls() ? SETTINGS_REMOTE_POLL_INTERVAL_MS
+                                      : SETTINGS_POLL_INTERVAL_MS;
+  }
 }

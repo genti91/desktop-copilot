@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from google.genai import types
 
@@ -34,8 +34,13 @@ app.include_router(ota_sync_router)
 install_auth(app)
 
 
+MISSING_GEMINI = "Falta GEMINI_API_KEY en el .env del backend."
+
+
 @app.post("/process-notes", response_model=MultiProjectResponse)
 def process_notes(payload: NotesPayload, background_tasks: BackgroundTasks):
+    if gemini is None:
+        raise HTTPException(status_code=503, detail=MISSING_GEMINI)
     today = datetime.now().strftime("%d/%m/%Y")
     prompt = f"""
     Eres un asistente para una diseñadora gráfica de imagen corporativa.
@@ -76,6 +81,17 @@ async def voice_assistant(
 ):
     audio_bytes = await file.read()
     sessions.setdefault(session_id, [])
+
+    if gemini is None:
+        # El ESP32 reproduce lo que le devuelvan, así que le contestamos hablando
+        # en vez de mandarle un JSON de error que sonaría a ruido.
+        return Response(
+            content=await generate_speech_bytes(
+                "Todavía no tengo configurada la clave de Gemini en el servidor."
+            ),
+            media_type="audio/mpeg",
+            headers={"X-Action": "NONE"},
+        )
 
     user_text = ""
     if groq:
@@ -143,7 +159,7 @@ async def voice_assistant(
 
 
 def _retrieve_context(user_text: str) -> str:
-    if not user_text or collection.count() == 0:
+    if gemini is None or not user_text or collection.count() == 0:
         return "No hay datos relevantes en la base."
     try:
         embedding = gemini.models.embed_content(model="gemini-embedding-2", contents=user_text)
@@ -155,7 +171,7 @@ def _retrieve_context(user_text: str) -> str:
         documents = results.get("documents", [[]])[0]
         return "\n---\n".join(documents) if documents else "No hay datos relevantes en la base."
     except Exception as error:
-        print(f"[ChromaDB Query Error]: {error}")
+        print(f"[Vector Store Query Error]: {error}")
         return "No hay datos relevantes en la base."
 
 

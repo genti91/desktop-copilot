@@ -16,9 +16,9 @@ ESP32 (misma casa)
   -> IP local de la Pi :8000     <- NO pasa por el tunel
 ```
 
-El ESP32 se queda hablando HTTP plano contra la IP local. No lo mandes por el
-tunel: el firmware no tiene TLS (`network.cpp` se conecta con un `WiFiClient`
-crudo), asi que una URL `https://` no le va a funcionar.
+Por defecto el ESP32 habla HTTP plano contra la IP local, que es lo mas simple
+y rapido mientras viva en tu escritorio. Si lo vas a mover de red, el firmware
+tambien habla HTTPS: ver "El ESP32 desde cualquier red" al final.
 
 ## Antes de empezar
 
@@ -187,4 +187,62 @@ Access adelante (login con Google/GitHub), usando un dominio propio; el GitHub
 Student Pack regala un `.me` en Namecheap por un ano.
 
 Si terminas un tunel en la Pi, ojo con `TRUSTED_NETWORKS`: loopback esta fuera de
-la lista a proposito, para que el trafico del tunel no saltee el login.
+la lista a proposito, para que el trafico del tunel no saltee el login. Funnel
+proxea a `localhost`, asi que todo lo que entra por el tunel llega como
+`127.0.0.1` y necesita credenciales si o si.
+
+## El ESP32 desde cualquier red
+
+Tailscale no corre en el ESP32, pero tampoco hace falta: alcanza con que el
+dispositivo pueda *llegar* al backend. Funnel le da una URL publica con HTTPS.
+
+### 1. Habilitar Funnel
+
+La primera vez hay que habilitarlo en la consola de administracion; el comando
+te da el link exacto:
+
+```bash
+tailscale funnel --bg 8000
+```
+
+Una vez habilitado, el backend queda en `https://<maquina>.<tailnet>.ts.net`.
+
+### 2. Poner el token del dispositivo
+
+Al entrar por el tunel el ESP32 ya no viene de una red confiable, asi que
+necesita `DEVICE_TOKEN` en `backend/.env`:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
+Y reiniciar: `sudo systemctl restart desktop-copilot`.
+
+Sin esto el dispositivo recibe 401 por el tunel, que es el comportamiento
+correcto: el backend quedo publico y no queremos que cualquiera le mande audio.
+
+### 3. Configurar el ESP32
+
+Manten presionado el reset hasta que abra el portal `ESP32_Asistente` y carga:
+
+- **URL del backend**: `https://<maquina>.<tailnet>.ts.net/voice-assistant`
+- **Token del dispositivo**: el que generaste arriba
+
+Los dos quedan en `/config.txt` de LittleFS (URL en la primera linea, token en la
+segunda).
+
+### Como lo resuelve el firmware
+
+`backend.cpp` decide el transporte segun el esquema de la URL: `WiFiClient` plano
+para `http://`, `WiFiClientSecure` con el root CA de Let's Encrypt para
+`https://` (Funnel usa certificados suyos). El puerto sale del esquema cuando la
+URL no lo dice, que es el caso de Funnel. El token viaja en `X-Device-Token` en
+todos los pedidos: el audio, el sondeo de configuracion, la imagen y el OTA.
+
+El certificado embebido es ISRG Root X1, que vence en junio de 2035.
+
+### Si algo falla
+
+Volves a entrar al portal cautivo (que es local, no depende del tunel) y pones
+de nuevo la URL de la LAN. Por eso conviene probar el OTA en la red local antes
+de mover el dispositivo.

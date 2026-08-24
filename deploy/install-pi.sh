@@ -99,7 +99,9 @@ if ! grep -qE '^PANEL_PASSWORD=.+' "$ENV_FILE"; then
 fi
 
 if ! grep -qE '^GEMINI_API_KEY=.+' "$ENV_FILE"; then
-  warn "Falta GEMINI_API_KEY en $ENV_FILE: el asistente de voz no va a responder hasta que la pongas."
+  warn "Falta GEMINI_API_KEY en $ENV_FILE."
+  warn "El panel, la config del dispositivo y el OTA funcionan igual, pero el"
+  warn "asistente de voz no va a responder hasta que la pongas y reinicies."
 fi
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +155,9 @@ if curl -fsS "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status":"ok
   echo "  /health -> $HEALTH"
   case "$HEALTH" in
     *'"auth":false'*) warn "El panel está SIN password. Poné PANEL_PASSWORD en $ENV_FILE y reiniciá." ;;
+  esac
+  case "$HEALTH" in
+    *'"ai":false'*) warn "Sin GEMINI_API_KEY: el asistente de voz queda mudo." ;;
   esac
 else
   warn "El servicio no respondió a tiempo. Mirá los logs:"
