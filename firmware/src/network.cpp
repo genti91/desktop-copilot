@@ -250,9 +250,6 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   String action = http.header("X-Action");
   http.end();
-  // Antes de decodificar: libera el contexto TLS para no tenerlo en heap
-  // mientras libmad trabaja.
-  backendDisconnect();
 
   if (written <= 0) {
     Serial.printf("❌ No llegó cuerpo en la respuesta (%d).\n", written);
@@ -279,6 +276,11 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   if (action.length() > 0) executeDeviceCommand(action);
   startPlayback(fileSize);
+
+  // El desmontaje de TLS va despues de que la reproduccion abrio su archivo.
+  // Al reves, el descriptor recien abierto quedaba invalido: getPos() devolvia
+  // -1 en el primer loop() del decodificador, y solo reabrirlo lo arreglaba.
+  backendDisconnect();
 
   // El lock se suelta recién acá. Si se soltaba antes, la tarea de mantenimiento
   // veía mp3->isRunning() todavía en false, arrancaba un handshake TLS —CPU pura
