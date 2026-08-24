@@ -24,6 +24,7 @@ constexpr uint32_t NETWORK_LOCK_WAIT_MS = 8000;
 // proxy en el medio. Con HTTPClient eso lo resuelve la librería.
 uint8_t* requestBuffer = NULL;
 size_t requestCapacity = 0;
+uint8_t playbackRetries = 0;
 
 bool ensureRequestBuffer(size_t needed) {
   if (requestBuffer != NULL && requestCapacity >= needed) return true;
@@ -171,6 +172,7 @@ void startPlayback(size_t fileSize) {
   file = new AudioFileSourceLittleFS(RESPONSE_PATH);
   bool started = mp3->begin(file, out);
   playbackStartedMs = millis();
+  playbackRetries = 0;
   Serial.printf("🔊 Reproduciendo %u bytes (begin=%s, fuente=%s, ve %u bytes).\n",
                 (unsigned)fileSize, started ? "ok" : "FALLÓ",
                 file->isOpen() ? "abierta" : "CERRADA", (unsigned)file->getSize());
@@ -283,4 +285,27 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   // en el mismo núcleo que loop()— y le robaba el procesador al decodificador
   // justo en los primeros segundos de la reproducción.
   backendUnlock();
+}
+
+bool retryPlayback() {
+  // El archivo ya se verifico frame por frame, asi que si falla al instante el
+  // problema no es el MP3 sino el estado del decodificador o de la salida justo
+  // despues del pedido. Reintentar desde cero lo distingue: si a la segunda
+  // suena, es estado transitorio; si vuelve a fallar, no.
+  if (playbackRetries >= 1) return false;
+  playbackRetries++;
+
+  mp3->stop();
+  if (file) {
+    delete file;
+    file = NULL;
+  }
+
+  file = new AudioFileSourceLittleFS(RESPONSE_PATH);
+  if (!mp3->begin(file, out)) {
+    Serial.println("   el reintento tampoco pudo arrancar");
+    return false;
+  }
+  playbackStartedMs = millis();
+  return true;
 }
