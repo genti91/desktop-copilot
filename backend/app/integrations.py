@@ -19,7 +19,10 @@ from .models import ActionItem, ProjectSummary
 from .vectorstore import Collection
 
 
-gemini = genai.Client(api_key=GEMINI_API_KEY)
+# Sin key, el cliente de Gemini falla al construirse y se lleva puesto el import
+# de toda la app. Queda en None para que el panel, la configuración del
+# dispositivo y el OTA sigan funcionando: nada de eso usa Gemini.
+gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 groq = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 notion = NotionClient(auth=NOTION_API_KEY) if NOTION_API_KEY else None
 collection = Collection(VECTOR_STORE_PATH)
@@ -113,6 +116,8 @@ def mark_rag_tasks_as_completed(project_name: str, completed_tasks: list[str]):
 
 
 def save_project_to_rag(meeting_title: str, project: ProjectSummary) -> str:
+    if gemini is None:
+        return ""
     action_items = "\n".join(
         f"- {item.task} (Entrega: {item.due_date})" for item in project.action_items
     )

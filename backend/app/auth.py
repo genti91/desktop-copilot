@@ -222,7 +222,9 @@ def logout():
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "auth": auth_enabled()}
+    from .config import GEMINI_API_KEY
+
+    return {"status": "ok", "auth": auth_enabled(), "ai": bool(GEMINI_API_KEY)}
 
 
 def install_auth(app: FastAPI) -> None:

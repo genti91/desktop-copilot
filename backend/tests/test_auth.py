@@ -199,7 +199,8 @@ def test_health_is_public(secured):
     with client_from(REMOTE_CLIENT) as test_client:
         response = test_client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "auth": True}
+        assert response.json()["status"] == "ok"
+        assert response.json()["auth"] is True
 
 
 def test_every_device_route_exists_in_the_app(secured):

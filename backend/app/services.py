@@ -16,6 +16,8 @@ from .state import state_memory
 
 
 def extract_and_save_data(user_text: str, default_project: str):
+    if gemini is None:
+        return
     try:
         today = datetime.now().strftime("%d/%m/%Y")
         prompt = f"""
