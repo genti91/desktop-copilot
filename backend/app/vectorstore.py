@@ -1,9 +1,14 @@
-"""Almacén de vectores mínimo sobre SQLite.
+"""Almacén de vectores mínimo sobre SQLite, sólo con la librería estándar.
 
 Reemplaza a ChromaDB, que arrastraba `onnxruntime` (sin wheels para ARM de 32
 bits, así que no instala en la Raspberry Pi) además de grpcio, kubernetes y
 opentelemetry. Los embeddings los genera Gemini, así que de Chroma sólo se usaba
 el almacenamiento y la búsqueda por similitud: eso es lo que hay acá.
+
+Tampoco usa numpy a propósito: en la Pi, numpy depende de libopenblas, y medido
+ahí una búsqueda por coseno en Python puro sobre 100 documentos de 1536
+dimensiones tarda ~19 ms. Al lado del embedding y la respuesta del modelo, que
+son cientos de milisegundos, no se nota.
 
 La interfaz imita la de una colección de Chroma —mismos nombres y mismas formas
 de retorno— para que el resto del backend no tenga que cambiar.
@@ -12,12 +17,12 @@ de retorno— para que el resto del backend no tenga que cambiar.
 import json
 import sqlite3
 import threading
+from array import array
 from contextlib import contextmanager
 from datetime import datetime
+from operator import mul
 from pathlib import Path
 from typing import Any, Iterable, Optional
-
-import numpy as np
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -26,6 +31,7 @@ CREATE TABLE IF NOT EXISTS documents (
     metadata   TEXT NOT NULL,
     embedding  BLOB NOT NULL,
     dimensions INTEGER NOT NULL,
+    norm       REAL NOT NULL,
     created_at TEXT NOT NULL
 );
 """
@@ -33,6 +39,20 @@ CREATE TABLE IF NOT EXISTS documents (
 
 class UnsupportedFilter(ValueError):
     """El filtro `where` usa un operador que este almacén no implementa."""
+
+
+def _to_vector(values: Iterable[float]) -> array:
+    return array("f", (float(value) for value in values))
+
+
+def _from_blob(blob: bytes) -> array:
+    vector = array("f")
+    vector.frombytes(blob)
+    return vector
+
+
+def _norm(vector: array) -> float:
+    return sum(map(mul, vector, vector)) ** 0.5
 
 
 def _matches(metadata: dict, where: Optional[dict]) -> bool:
@@ -43,12 +63,12 @@ def _matches(metadata: dict, where: Optional[dict]) -> bool:
         value = metadata.get(field)
         if isinstance(condition, dict):
             for operator, expected in condition.items():
+                if operator not in ("$eq", "$ne"):
+                    raise UnsupportedFilter(f"Operador no soportado: {operator}")
                 if operator == "$eq" and value != expected:
                     return False
                 if operator == "$ne" and value == expected:
                     return False
-                if operator not in ("$eq", "$ne"):
-                    raise UnsupportedFilter(f"Operador no soportado: {operator}")
         elif value != condition:
             return False
     return True
@@ -88,14 +108,15 @@ class Collection:
         rows = []
         now = datetime.now().isoformat(timespec="seconds")
         for document_id, embedding, document, metadata in zip(ids, embeddings, documents, metadatas):
-            vector = np.asarray(list(embedding), dtype=np.float32)
+            vector = _to_vector(embedding)
             rows.append(
                 (
                     document_id,
                     document,
                     json.dumps(metadata, ensure_ascii=False),
                     vector.tobytes(),
-                    int(vector.size),
+                    len(vector),
+                    _norm(vector),
                     now,
                 )
             )
@@ -103,8 +124,8 @@ class Collection:
         with self._lock, self._connect() as connection:
             connection.executemany(
                 "INSERT OR REPLACE INTO documents"
-                " (id, document, metadata, embedding, dimensions, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                " (id, document, metadata, embedding, dimensions, norm, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -152,23 +173,26 @@ class Collection:
         candidates = []
         with self._connect() as connection:
             for row in connection.execute(
-                "SELECT id, document, metadata, embedding, dimensions FROM documents"
+                "SELECT id, document, metadata, embedding, dimensions, norm FROM documents"
             ):
                 metadata = json.loads(row["metadata"])
                 if _matches(metadata, where):
                     candidates.append((row, metadata))
 
         for query_embedding in query_embeddings:
-            query_vector = np.asarray(list(query_embedding), dtype=np.float32)
-            query_norm = np.linalg.norm(query_vector)
+            query_vector = _to_vector(query_embedding)
+            query_norm = _norm(query_vector)
 
             scored = []
             for row, metadata in candidates:
-                if row["dimensions"] != query_vector.size:
+                if row["dimensions"] != len(query_vector):
                     continue  # embedding de otro modelo: no es comparable
-                vector = np.frombuffer(row["embedding"], dtype=np.float32)
-                denominator = query_norm * np.linalg.norm(vector)
-                similarity = 0.0 if denominator == 0 else float(query_vector @ vector / denominator)
+                denominator = query_norm * row["norm"]
+                similarity = (
+                    0.0
+                    if denominator == 0
+                    else sum(map(mul, query_vector, _from_blob(row["embedding"]))) / denominator
+                )
                 scored.append((1.0 - similarity, row, metadata))
 
             scored.sort(key=lambda item: item[0])

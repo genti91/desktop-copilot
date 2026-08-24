@@ -4,7 +4,6 @@ google-genai
 groq
 httpx
 notion-client
-numpy
 pillow
 python-dotenv
 python-multipart
