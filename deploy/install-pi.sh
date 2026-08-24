@@ -55,17 +55,7 @@ say "Entorno virtual"
 [ -d "$BACKEND_DIR/venv" ] || python3 -m venv "$BACKEND_DIR/venv"
 "$BACKEND_DIR/venv/bin/pip" install --upgrade pip --quiet
 
-AVAILABLE_MB="$(free -m | awk '/^Mem:/ {print $2}')"
-SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}')"
-if [ "$AVAILABLE_MB" -lt 1800 ] && [ "$SWAP_MB" -lt 1000 ]; then
-  warn "Tenés ${AVAILABLE_MB}MB de RAM y ${SWAP_MB}MB de swap."
-  warn "ChromaDB compila en ARM y puede quedarse sin memoria. Si falla, agrandá el swap:"
-  warn "  sudo dphys-swapfile swapoff"
-  warn "  sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile"
-  warn "  sudo dphys-swapfile setup && sudo dphys-swapfile swapon"
-fi
-
-say "Instalando dependencias de Python (tarda bastante en ARM)"
+say "Instalando dependencias de Python (unos minutos en ARM)"
 "$BACKEND_DIR/venv/bin/pip" install -r "$BACKEND_DIR/requirements.txt"
 
 # --------------------------------------------------------------------------- #

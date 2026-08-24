@@ -1,10 +1,10 @@
-chromadb
 edge-tts
 fastapi
 google-genai
 groq
 httpx
 notion-client
+numpy
 pillow
 python-dotenv
 python-multipart

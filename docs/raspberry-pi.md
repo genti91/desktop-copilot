@@ -22,8 +22,8 @@ crudo), asi que una URL `https://` no le va a funcionar.
 
 ## Antes de empezar
 
-- Raspberry Pi 4 con 2 GB o mas. En una Pi 3 o Zero 2W (1 GB) el backend compite
-  con OctoPrint por memoria y ChromaDB no deja mucho margen.
+- Raspberry Pi 3 o superior. Funciona igual en imagenes de 32 bits (armhf): el
+  backend no usa ChromaDB ni onnxruntime, que no tienen wheels para ARM de 32 bits.
 - OctoPi ya funcionando y con acceso por SSH.
 - El repo con las claves de IA que vas a usar (Gemini obligatoria).
 
@@ -81,10 +81,8 @@ python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ```
 
-La instalacion de dependencias tarda bastante en ARM: ChromaDB compila algunas
-cosas. Si se queda sin memoria, agranda el swap temporalmente
-(`sudo dphys-swapfile swapoff`, editar `CONF_SWAPSIZE=2048` en
-`/etc/dphys-swapfile`, `sudo dphys-swapfile setup && sudo dphys-swapfile swapon`).
+La instalacion tarda unos minutos en ARM. Las dependencias pesadas (numpy,
+pillow) tienen wheels en piwheels, que Raspberry Pi OS ya trae configurado.
 
 Configura el entorno:
 
@@ -154,9 +152,12 @@ automatico. Ver la seccion de OTA en el README principal.
 **Los puertos 80 y 443 estan ocupados.** OctoPi corre haproxy adelante de
 OctoPrint. Por eso el backend usa el 8000; no intentes moverlo al 80.
 
-**Memoria.** Con OctoPrint imprimiendo, el backend y ChromaDB arriba, una Pi de
-2 GB va justa. Si ves el OOM killer en `dmesg`, agrega `MemoryMax=700M` al
-service (con el riesgo de que mate requests) o mueve ChromaDB a otra maquina.
+**Memoria.** El backend arranca en ~120 MB. Si ves el OOM killer en `dmesg`
+mientras imprimis, agrega `MemoryMax=400M` al service.
+
+**32 bits.** OctoPi usa una imagen armhf. Por eso la memoria consultable corre
+sobre SQLite y no sobre ChromaDB: este ultimo depende de `onnxruntime`, que nunca
+publico wheels para armv7l.
 
 **CPU durante impresiones.** El service ya viene con `Nice=5` para que OctoPrint
 tenga prioridad y no se arruine un print por un pico del backend.

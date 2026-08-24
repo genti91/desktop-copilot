@@ -8,6 +8,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 APP_TITLE = "Desktop Co-Pilot API"
+# Base de la memoria consultable (RAG). CHROMA_PATH queda sólo para que el
+# script de migración encuentre la base vieja de ChromaDB.
+VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", str(BASE_DIR / "data" / "memory.sqlite3"))
 CHROMA_PATH = os.getenv("CHROMA_PATH", str(BASE_DIR / "chroma_db"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

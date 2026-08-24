@@ -13,12 +13,13 @@ backend/
 │   ├── device.py          # Config del dispositivo, imágenes y OTA
 │   ├── ota_sync.py        # Espejado del firmware desde releases de GitHub
 │   ├── pages.py           # Layout, navegación y páginas del panel
-│   ├── integrations.py    # Gemini, Groq, Notion, ChromaDB y TTS
+│   ├── integrations.py    # Gemini, Groq, Notion y TTS
+│   ├── vectorstore.py     # Memoria consultable (RAG) sobre SQLite
 │   ├── main.py            # Aplicación y endpoints HTTP
 │   ├── models.py          # Schemas Pydantic
 │   ├── services.py        # Procesamiento en segundo plano
 │   └── templates/         # layout.html + una plantilla por sección
-├── chroma_db/             # Datos persistidos de ChromaDB
+├── chroma_db/             # Base vieja de ChromaDB (migrable, ya no se usa)
 ├── data/                  # Estado del dispositivo y firmware OTA (no versionado)
 ├── scripts/               # Utilidades (extracción de imágenes del PDF)
 ├── tests/                 # Tests de páginas, dispositivo y sync de firmware

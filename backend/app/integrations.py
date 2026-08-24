@@ -3,27 +3,26 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-import chromadb
 import edge_tts
 from google import genai
 from groq import Groq
 from notion_client import Client as NotionClient
 
 from .config import (
-    CHROMA_PATH,
     GEMINI_API_KEY,
     GROQ_API_KEY,
     NOTION_API_KEY,
     NOTION_DATABASE_ID,
+    VECTOR_STORE_PATH,
 )
 from .models import ActionItem, ProjectSummary
+from .vectorstore import Collection
 
 
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 groq = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 notion = NotionClient(auth=NOTION_API_KEY) if NOTION_API_KEY else None
-chroma = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = chroma.get_or_create_collection(name="meetings")
+collection = Collection(VECTOR_STORE_PATH)
 
 
 def clean_notion_id(raw_id: str) -> str:
