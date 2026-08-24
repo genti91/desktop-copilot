@@ -3,6 +3,7 @@ edge-tts
 fastapi
 google-genai
 groq
+httpx
 notion-client
 pillow
 python-dotenv

@@ -1,0 +1,61 @@
+<section class="card">
+    <div class="card-head">
+        <h2>Instrucción de sistema</h2>
+        <p>
+            Define el tono y el rol del asistente en cada respuesta de voz. Los comandos de luces
+            se agregan aparte, así que no hace falta mencionarlos acá.
+        </p>
+    </div>
+    <div class="field">
+        <label for="personalityText">Personalidad</label>
+        <textarea id="personalityText">__PERSONALITY__</textarea>
+    </div>
+    <div class="actions">
+        <button type="button" id="saveButton">Guardar personalidad</button>
+        <button type="button" class="ghost" id="resetButton">Restaurar por defecto</button>
+    </div>
+    <div id="statusPersonality" class="status" role="status"></div>
+</section>
+
+<script>
+    const DEFAULT_PERSONALITY = __DEFAULT_PERSONALITY__;
+    const personalityText = document.getElementById('personalityText');
+    const personalityStatus = document.getElementById('statusPersonality');
+    const saveButton = document.getElementById('saveButton');
+
+    function setStatus(message, state) {
+        personalityStatus.textContent = message;
+        if (state) personalityStatus.dataset.state = state;
+        else delete personalityStatus.dataset.state;
+    }
+
+    async function updatePersonality() {
+        if (!personalityText.value.trim()) {
+            setStatus('La personalidad no puede quedar vacía.', 'error');
+            return;
+        }
+        saveButton.disabled = true;
+        setStatus('Guardando…');
+        try {
+            const response = await fetch('/update-personality', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ personality_text: personalityText.value })
+            });
+            setStatus(
+                response.ok ? 'Personalidad actualizada.' : 'Error al actualizar.',
+                response.ok ? 'ok' : 'error'
+            );
+        } catch (error) {
+            setStatus('No se pudo contactar al backend.', 'error');
+        } finally {
+            saveButton.disabled = false;
+        }
+    }
+
+    saveButton.addEventListener('click', updatePersonality);
+    document.getElementById('resetButton').addEventListener('click', () => {
+        personalityText.value = DEFAULT_PERSONALITY;
+        setStatus('Texto restaurado. Acordate de guardar.');
+    });
+</script>

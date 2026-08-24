@@ -1,0 +1,178 @@
+<section class="card">
+    <div class="card-head">
+        <h2>Firmware publicado</h2>
+        <p>Es lo que el ESP32 encuentra al consultar <code>/ota/manifest</code>.</p>
+    </div>
+    <div id="manifest"><p class="empty">Cargando…</p></div>
+    <div class="actions" id="manifestActions" hidden>
+        <button type="button" class="danger" id="unpublishButton">Despublicar</button>
+        <span class="empty">El dispositivo se queda con el firmware que ya tiene instalado.</span>
+    </div>
+    <div id="statusUnpublish" class="status" role="status"></div>
+</section>
+
+<section class="card">
+    <div class="card-head">
+        <h2>Sincronización con GitHub</h2>
+        <p>
+            Cada push a <code>main</code> que toque <code>firmware/</code> dispara una compilación
+            en GitHub Actions que publica un release. Este backend lo revisa periódicamente y lo
+            deja listo para el ESP32, sin que tengas que subir nada a mano.
+        </p>
+    </div>
+    <div id="sync"><p class="empty">Cargando…</p></div>
+    <div class="actions">
+        <button type="button" id="syncButton">Buscar ahora</button>
+        <button type="button" class="ghost" id="forceSyncButton">Forzar reinstalación</button>
+    </div>
+    <div id="statusSync" class="status" role="status"></div>
+</section>
+
+<section class="card">
+    <div class="card-head">
+        <h2>Publicar a mano</h2>
+        <p>
+            Alternativa por si querés probar un binario sin pasar por GitHub. Compilá con
+            <code>pio run -e xiao_esp32s3</code> y subí
+            <code>firmware/.pio/build/xiao_esp32s3/firmware.bin</code>.
+            El build tiene que ser mayor al instalado en el dispositivo.
+        </p>
+    </div>
+
+    <div class="field">
+        <label for="firmwareFile">Binario</label>
+        <input type="file" id="firmwareFile" accept=".bin">
+    </div>
+
+    <div class="field-grid">
+        <div>
+            <label for="firmwareVersion">Versión</label>
+            <input type="text" id="firmwareVersion" placeholder="1.2.0">
+        </div>
+        <div>
+            <label for="firmwareBuild">Build</label>
+            <input type="number" id="firmwareBuild" placeholder="6" min="1">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="firmwareNotes">Notas (opcional)</label>
+        <input type="text" id="firmwareNotes" placeholder="Qué cambia en esta versión">
+    </div>
+
+    <div class="actions">
+        <button type="button" id="publishButton">Publicar firmware</button>
+    </div>
+    <div id="statusFirmware" class="status" role="status"></div>
+</section>
+
+<section class="card">
+    <div class="card-head">
+        <h2>El recorrido completo</h2>
+    </div>
+    <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:14px;line-height:1.9">
+        <li>Editás el firmware y hacés push a <code>main</code>.</li>
+        <li>GitHub Actions compila y publica un release. El número de build sale de la cantidad de commits, así que sube solo.</li>
+        <li>Este backend detecta el release, verifica el SHA-256 y lo deja publicado.</li>
+        <li>El ESP32 consulta el manifest al arrancar y cada 15 minutos en reposo.</li>
+        <li>Si el build remoto es mayor, descarga con progreso en pantalla, revalida el SHA-256 y reinicia. Si el hash no coincide, aborta y sigue con el firmware actual.</li>
+    </ol>
+</section>
+
+<script>
+    function setStatus(id, message, state) {
+        const node = document.getElementById(id);
+        node.textContent = message;
+        if (state) node.dataset.state = state;
+        else delete node.dataset.state;
+    }
+
+    async function loadManifest() {
+        const manifest = await (await fetch('/ota/manifest')).json();
+        const node = document.getElementById('manifest');
+        const actions = document.getElementById('manifestActions');
+
+        if (!manifest.available) {
+            node.innerHTML = '<p class="empty">No hay firmware publicado. El ESP32 sigue con el que tiene instalado.</p>';
+            actions.hidden = true;
+            return;
+        }
+
+        node.innerHTML =
+            '<dl class="kv">' +
+            '<dt>Versión</dt><dd><b>' + manifest.version + '</b> · build ' + manifest.build + '</dd>' +
+            '<dt>Tamaño</dt><dd>' + (manifest.size / 1024).toFixed(1) + ' KB</dd>' +
+            '<dt>SHA-256</dt><dd><code>' + manifest.sha256 + '</code></dd>' +
+            '<dt>Publicado</dt><dd>' + manifest.uploaded_at.replace('T', ' ') + '</dd>' +
+            (manifest.notes ? '<dt>Notas</dt><dd>' + manifest.notes + '</dd>' : '') +
+            '</dl>';
+        actions.hidden = false;
+    }
+
+    async function loadSync() {
+        const sync = await (await fetch('/ota/sync')).json();
+        const minutes = Math.round(sync.interval_seconds / 60);
+        document.getElementById('sync').innerHTML =
+            '<dl class="kv">' +
+            '<dt>Repositorio</dt><dd><code>' + (sync.repo || 'sin configurar') + '</code></dd>' +
+            '<dt>Automático</dt><dd>' + (sync.enabled ? 'sí, cada ' + minutes + ' min' : 'desactivado') + '</dd>' +
+            '<dt>Último chequeo</dt><dd>' + (sync.last_checked ? sync.last_checked.replace('T', ' ') : '—') + '</dd>' +
+            '<dt>Resultado</dt><dd>' + sync.outcome + '</dd>' +
+            (sync.last_release ? '<dt>Release</dt><dd><code>' + sync.last_release + '</code></dd>' : '') +
+            (sync.error ? '<dt>Error</dt><dd style="color:var(--err)">' + sync.error + '</dd>' : '') +
+            '</dl>';
+    }
+
+    async function runSync(force) {
+        setStatus('statusSync', force ? 'Reinstalando desde GitHub…' : 'Consultando GitHub…');
+        const response = await fetch('/ota/sync' + (force ? '?force=true' : ''), { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            setStatus('statusSync', error.detail || 'No se pudo sincronizar.', 'error');
+            return;
+        }
+        const sync = await response.json();
+        await loadSync();
+        await loadManifest();
+        setStatus('statusSync', sync.outcome, sync.error ? 'error' : 'ok');
+    }
+
+    document.getElementById('syncButton').addEventListener('click', () => runSync(false));
+    document.getElementById('forceSyncButton').addEventListener('click', () => runSync(true));
+
+    document.getElementById('publishButton').addEventListener('click', async () => {
+        const input = document.getElementById('firmwareFile');
+        const version = document.getElementById('firmwareVersion').value.trim();
+        const build = document.getElementById('firmwareBuild').value.trim();
+
+        if (!input.files.length) { setStatus('statusFirmware', 'Elegí el archivo firmware.bin.', 'error'); return; }
+        if (!version || !build) { setStatus('statusFirmware', 'Completá versión y build.', 'error'); return; }
+
+        const body = new FormData();
+        body.append('file', input.files[0]);
+        body.append('version', version);
+        body.append('build', build);
+        body.append('notes', document.getElementById('firmwareNotes').value);
+
+        setStatus('statusFirmware', 'Subiendo firmware…');
+        const response = await fetch('/ota/firmware', { method: 'POST', body });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            setStatus('statusFirmware', error.detail || 'Error al publicar el firmware.', 'error');
+            return;
+        }
+        input.value = '';
+        await loadManifest();
+        setStatus('statusFirmware', 'Firmware publicado. El ESP32 lo toma en su próximo chequeo.', 'ok');
+    });
+
+    document.getElementById('unpublishButton').addEventListener('click', async () => {
+        setStatus('statusUnpublish', 'Quitando firmware…');
+        await fetch('/ota/firmware', { method: 'DELETE' });
+        await loadManifest();
+        setStatus('statusUnpublish', 'Firmware despublicado.', 'ok');
+    });
+
+    loadManifest();
+    loadSync();
+</script>

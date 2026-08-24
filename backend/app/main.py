@@ -1,22 +1,37 @@
-import html
+import asyncio
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import Response
 from google.genai import types
 
-from .config import APP_TITLE, FAST_GENAI_CONFIG, MAX_HISTORY_MESSAGES
+from .auth import install_auth
+from .config import APP_TITLE, FAST_GENAI_CONFIG, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
 from .device import router as device_router
 from .integrations import collection, generate_speech_bytes, gemini, groq
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
+from .ota_sync import background_sync_loop, router as ota_sync_router
+from .pages import router as pages_router
 from .services import extract_and_save_data, process_meeting_storage
 from .state import sessions, state_memory
 
-app = FastAPI(title=APP_TITLE)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Mientras el backend viva, va a buscar firmware nuevo a GitHub."""
+    sync_task = asyncio.create_task(background_sync_loop()) if FIRMWARE_AUTO_SYNC else None
+    yield
+    if sync_task:
+        sync_task.cancel()
+
+
+app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+app.include_router(pages_router)
 app.include_router(device_router)
-DASHBOARD_TEMPLATE = Path(__file__).parent / "templates" / "dashboard.html"
+app.include_router(ota_sync_router)
+install_auth(app)
 
 
 @app.post("/process-notes", response_model=MultiProjectResponse)
@@ -148,13 +163,3 @@ def _retrieve_context(user_text: str) -> str:
 def update_personality(payload: PersonalityPayload):
     state_memory["assistant_personality"] = payload.personality_text
     return {"status": "success", "current_personality": state_memory["assistant_personality"]}
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def get_dashboard():
-    template = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
-    content = template.replace(
-        "__PERSONALITY__",
-        html.escape(state_memory["assistant_personality"]),
-    )
-    return HTMLResponse(content=content)

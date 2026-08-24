@@ -110,6 +110,14 @@ def test_catalog_lists_defaults(client):
     assert len(first["checksum"]) == 16
 
 
+def test_labels_are_readable(client):
+    labels = {image["id"]: image["label"] for image in client.get("/device/images").json()}
+    for image_id, label in labels.items():
+        assert not label[0].isdigit(), f"{image_id} conserva el prefijo numérico"
+        assert "  " not in label, f"{image_id} deja espacios dobles"
+        assert "-" not in label
+
+
 def test_selecting_an_image_exposes_it_to_the_device(client):
     image_id = client.get("/device/images").json()[0]["id"]
     assert client.post("/device/config", json={"image_id": image_id}).status_code == 200
@@ -240,15 +248,3 @@ def test_build_must_be_positive(client):
         data={"version": "1.0.1", "build": "0"},
     )
     assert response.status_code == 400
-
-
-# --------------------------------------------------------------------------- #
-# Página web
-# --------------------------------------------------------------------------- #
-
-
-def test_device_page_renders(client):
-    response = client.get("/device")
-    assert response.status_code == 200
-    assert "Configuración del Dispositivo" in response.text
-    assert "/ota/firmware" in response.text

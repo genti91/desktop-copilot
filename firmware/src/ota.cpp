@@ -142,9 +142,12 @@ bool downloadAndFlash(const String& binaryUrl, const String& expectedSha256) {
   return true;
 }
 
+uint32_t lastCheckMs = 0;
+
 }  // namespace
 
 void checkForFirmwareUpdate() {
+  lastCheckMs = millis();
   if (WiFi.status() != WL_CONNECTED) return;
 
   String baseUrl = backendBaseUrl();
@@ -183,6 +186,10 @@ void checkForFirmwareUpdate() {
   String expectedSha256 = manifest["sha256"] | "";
 
   Serial.println("⬇️ OTA: descargando " + remoteVersion + "...");
+
+  // Si la cara ya está animando (chequeo periódico), hay que sacarla del TFT
+  // antes de dibujar: corre en el otro núcleo.
+  pauseFaceAnimation();
   showOtaScreen("Actualizando", "v" + remoteVersion, TFT_CYAN);
 
   if (downloadAndFlash(baseUrl + path, expectedSha256)) {
@@ -194,4 +201,10 @@ void checkForFirmwareUpdate() {
 
   showOtaScreen("Fallo OTA", "Sigo con v" FIRMWARE_VERSION, TFT_RED);
   delay(2000);
+  resumeFaceAnimation();
+}
+
+void updateFirmwareCheck() {
+  if (millis() - lastCheckMs < OTA_CHECK_INTERVAL_MS) return;
+  checkForFirmwareUpdate();
 }

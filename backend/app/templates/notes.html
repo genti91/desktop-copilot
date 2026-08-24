@@ -1,0 +1,87 @@
+<section class="card">
+    <div class="card-head">
+        <h2>Subir notas de reunión</h2>
+        <p>
+            El asistente separa el texto por proyecto o cliente, extrae tareas con fecha de
+            entrega y feedback visual, lo indexa para consultarlo por voz y lo manda a Notion.
+        </p>
+    </div>
+    <div class="field">
+        <label for="notesText">Texto de la reunión</label>
+        <textarea id="notesText" placeholder="Pegá acá las notas de la reunión…"></textarea>
+    </div>
+    <div class="actions">
+        <button type="button" id="processButton">Procesar notas</button>
+        <button type="button" class="ghost" onclick="document.getElementById('notesText').value = ''">Limpiar</button>
+    </div>
+    <div id="statusNotes" class="status" role="status"></div>
+</section>
+
+<section class="card" id="resultCard" hidden>
+    <div class="card-head">
+        <h2>Resultado</h2>
+        <p>Lo que se extrajo de la última reunión procesada.</p>
+    </div>
+    <div id="resultBody"></div>
+</section>
+
+<script>
+    const notesText = document.getElementById('notesText');
+    const notesStatus = document.getElementById('statusNotes');
+    const processButton = document.getElementById('processButton');
+
+    function setStatus(node, message, state) {
+        node.textContent = message;
+        if (state) node.dataset.state = state;
+        else delete node.dataset.state;
+    }
+
+    function renderResult(data) {
+        const card = document.getElementById('resultCard');
+        const body = document.getElementById('resultBody');
+        const blocks = (data.projects || []).map(project => {
+            const tasks = (project.action_items || [])
+                .map(item => '<li>' + item.task + (item.due_date ? ' <span class="empty">— ' + item.due_date + '</span>' : '') + '</li>')
+                .join('');
+            const feedback = (project.design_feedback || []).map(item => '<li>' + item + '</li>').join('');
+            return '<h3 style="margin:22px 0 6px;font-size:15px">' + project.project_name + '</h3>' +
+                '<p class="empty" style="margin:0 0 10px">' + project.summary + '</p>' +
+                (tasks ? '<dl class="kv"><dt>Tareas</dt><dd><ul style="margin:0;padding-left:18px">' + tasks + '</ul></dd></dl>' : '') +
+                (feedback ? '<dl class="kv" style="margin-top:8px"><dt>Feedback</dt><dd><ul style="margin:0;padding-left:18px">' + feedback + '</ul></dd></dl>' : '');
+        }).join('<hr class="divider">');
+
+        body.innerHTML = '<p class="empty" style="margin:0">Reunión: <b style="color:var(--text)">' +
+            (data.meeting_title || 'sin título') + '</b></p>' + blocks;
+        card.hidden = false;
+    }
+
+    async function uploadNotes() {
+        if (!notesText.value.trim()) {
+            setStatus(notesStatus, 'Escribí o pegá las notas antes de procesar.', 'error');
+            return;
+        }
+        processButton.disabled = true;
+        setStatus(notesStatus, 'Procesando notas, indexando y enviando a Notion…');
+        try {
+            const response = await fetch('/process-notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notes_text: notesText.value, default_title: 'Reunión subida desde la web' })
+            });
+            if (!response.ok) {
+                setStatus(notesStatus, 'Error al procesar las notas.', 'error');
+                return;
+            }
+            const data = await response.json();
+            renderResult(data);
+            notesText.value = '';
+            setStatus(notesStatus, 'Notas procesadas correctamente.', 'ok');
+        } catch (error) {
+            setStatus(notesStatus, 'No se pudo contactar al backend.', 'error');
+        } finally {
+            processButton.disabled = false;
+        }
+    }
+
+    processButton.addEventListener('click', uploadNotes);
+</script>

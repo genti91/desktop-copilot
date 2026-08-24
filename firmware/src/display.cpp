@@ -7,6 +7,9 @@ constexpr uint16_t FACE_COLOR = TFT_WHITE;
 volatile FaceMode currentFaceMode = FACE_IDLE;
 volatile bool displayPowered = true;
 uint16_t* idleImage = nullptr;
+volatile bool faceTaskRunning = false;
+volatile bool facePaused = false;
+volatile bool faceParked = false;
 volatile bool idleImageReady = false;
 volatile bool idleImageDrawn = false;
 
@@ -198,9 +201,27 @@ bool hasIdleImage() {
   return idleImageReady;
 }
 
+void pauseFaceAnimation() {
+  if (!faceTaskRunning) return;
+  facePaused = true;
+  for (int attempt = 0; attempt < 50 && !faceParked; attempt++) delay(10);
+}
+
+void resumeFaceAnimation() {
+  idleImageDrawn = false;
+  facePaused = false;
+}
+
 void faceAnimationTask(void* parameter) {
   (void)parameter;
+  faceTaskRunning = true;
   for (;;) {
+    if (facePaused) {
+      faceParked = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+    faceParked = false;
     updateFace();
     vTaskDelay(pdMS_TO_TICKS(FACE_TASK_DELAY_MS));
   }

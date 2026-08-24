@@ -1,283 +1,217 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Dispositivo - Asistente</title>
-    <style>
-        :root { color-scheme: dark; }
-        body { font-family: system-ui, sans-serif; background: #1e1e2e; color: #cdd6f4; margin: 0; padding: 40px 16px; }
-        .container { max-width: 800px; margin: auto; background: #313244; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,.3); }
-        h1 { color: #b4befe; text-align: center; margin-bottom: 4px; }
-        h2 { border-bottom: 2px solid #45475a; padding-bottom: 10px; color: #f38ba8; margin-top: 34px; }
-        a { color: #89b4fa; }
-        .subtitle { text-align: center; color: #a6adc8; font-size: 14px; margin-top: 0; }
-        button { background: #89b4fa; color: #11111b; border: 0; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #74c7ec; }
-        button.secondary { background: #45475a; color: #cdd6f4; font-size: 14px; padding: 7px 14px; }
-        button.secondary:hover { background: #585b70; }
-        button.danger { background: #f38ba8; }
-        button.danger:hover { background: #eba0ac; }
-        .status { margin-top: 10px; min-height: 20px; font-size: 14px; color: #a6e3a1; font-weight: bold; }
-        .status.error { color: #f38ba8; }
-        .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #45475a; }
-        .row:last-of-type { border-bottom: 0; }
-        .row .label { font-weight: bold; }
-        .row .hint { display: block; font-weight: normal; color: #a6adc8; font-size: 13px; margin-top: 2px; }
-        input[type="color"] { width: 56px; height: 34px; background: #181825; border: 1px solid #45475a; border-radius: 5px; padding: 2px; cursor: pointer; }
-        input[type="range"] { width: 200px; accent-color: #89b4fa; }
-        input[type="text"], input[type="number"], input[type="file"] { background: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 5px; padding: 8px; font-size: 14px; box-sizing: border-box; }
-        .switch { position: relative; display: inline-block; width: 52px; height: 28px; flex: none; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; inset: 0; background: #585b70; border-radius: 28px; transition: .2s; cursor: pointer; }
-        .slider::before { content: ""; position: absolute; height: 22px; width: 22px; left: 3px; top: 3px; background: #cdd6f4; border-radius: 50%; transition: .2s; }
-        .switch input:checked + .slider { background: #a6e3a1; }
-        .switch input:checked + .slider::before { transform: translateX(24px); }
-        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; margin-top: 16px; }
-        .card { background: #181825; border: 2px solid #45475a; border-radius: 8px; padding: 8px; text-align: center; cursor: pointer; transition: border-color .15s; }
-        .card:hover { border-color: #74c7ec; }
-        .card.selected { border-color: #a6e3a1; }
-        .card img, .card .face { width: 100%; aspect-ratio: 1; border-radius: 4px; background: #000; display: block; object-fit: cover; }
-        .card .face { display: flex; align-items: center; justify-content: center; font-size: 34px; }
-        .card .name { font-size: 12px; margin-top: 6px; color: #cdd6f4; word-break: break-word; }
-        .card .remove { margin-top: 6px; font-size: 11px; padding: 4px 8px; }
-        .uploader { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
-        .manifest { background: #181825; border-radius: 8px; padding: 14px; font-size: 14px; line-height: 1.7; }
-        .manifest code { color: #f9e2af; word-break: break-all; }
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 14px; }
-    </style>
-</head>
-<body>
-    <main class="container">
-        <h1>Configuración del Dispositivo</h1>
-        <p class="subtitle">ESP32-S3 · <a href="/dashboard">volver al panel del asistente</a></p>
+<section class="card">
+    <div class="card-head">
+        <h2>Salidas</h2>
+        <p>Cada salida se prende y se apaga por separado. El ESP32 sondea estos valores cada 5 segundos.</p>
+    </div>
 
-        <h2>Luces y pantalla</h2>
-        <div class="row">
-            <span class="label">LED RGB
-                <span class="hint">NeoPixel del frente.</span>
-            </span>
+    <div class="row">
+        <div class="row-label">LED RGB
+            <span>NeoPixel del frente.</span>
+        </div>
+        <div class="row-control">
             <label class="switch"><input type="checkbox" id="rgbEnabled"><span class="slider"></span></label>
         </div>
-        <div class="row">
-            <span class="label">Color del LED RGB
-                <span class="hint">Se aplica en el próximo sondeo del dispositivo.</span>
-            </span>
-            <input type="color" id="rgbColor" value="#FF2A00">
+    </div>
+
+    <div class="row">
+        <div class="row-label">Color del LED RGB
+            <span>Se aplica en el próximo sondeo del dispositivo.</span>
         </div>
-        <div class="row">
-            <span class="label">Brillo
-                <span class="hint">0 a 255.</span>
-            </span>
-            <span><input type="range" id="rgbBrightness" min="0" max="255" value="70"> <b id="brightnessValue">70</b></span>
+        <div class="row-control">
+            <span class="value-badge" id="colorValue">#FF2A00</span>
+            <input type="color" id="rgbColor" value="#FF2A00" aria-label="Color del LED RGB">
         </div>
-        <div class="row">
-            <span class="label">LED de filamento
-                <span class="hint">Lámpara cálida lateral.</span>
-            </span>
+    </div>
+
+    <div class="row">
+        <div class="row-label">Brillo
+            <span>De 0 a 255.</span>
+        </div>
+        <div class="row-control">
+            <input type="range" id="rgbBrightness" min="0" max="255" value="70" aria-label="Brillo del LED RGB">
+            <span class="value-badge" id="brightnessValue">70</span>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="row-label">LED de filamento
+            <span>Lámpara cálida lateral.</span>
+        </div>
+        <div class="row-control">
             <label class="switch"><input type="checkbox" id="filamentEnabled"><span class="slider"></span></label>
         </div>
-        <div class="row">
-            <span class="label">Pantalla
-                <span class="hint">Apaga el backlight del TFT.</span>
-            </span>
+    </div>
+
+    <div class="row">
+        <div class="row-label">Pantalla
+            <span>Apaga el backlight del TFT.</span>
+        </div>
+        <div class="row-control">
             <label class="switch"><input type="checkbox" id="displayEnabled"><span class="slider"></span></label>
         </div>
-        <div id="statusConfig" class="status"></div>
+    </div>
 
+    <div id="statusConfig" class="status" role="status"></div>
+</section>
+
+<section class="card">
+    <div class="card-head">
         <h2>Imagen en pantalla</h2>
-        <p class="subtitle" style="text-align:left">
+        <p>
             La imagen elegida se muestra mientras el dispositivo está en reposo. Al tocar el sensor
             para hablar vuelve la cara animada, y al terminar la interacción reaparece la imagen.
         </p>
-        <div id="gallery" class="gallery"></div>
-        <div class="uploader">
+    </div>
+
+    <div id="gallery" class="gallery"></div>
+
+    <hr class="divider">
+
+    <div class="field-grid">
+        <div>
+            <label for="imageFile">Nueva imagen</label>
             <input type="file" id="imageFile" accept="image/*">
-            <input type="text" id="imageLabel" placeholder="Nombre (opcional)">
-            <button type="button" onclick="uploadImage()">Subir imagen</button>
         </div>
-        <div id="statusImages" class="status"></div>
-
-        <h2>Firmware (OTA)</h2>
-        <div id="manifest" class="manifest">Cargando…</div>
-        <div class="form-grid">
-            <input type="file" id="firmwareFile" accept=".bin">
-            <input type="text" id="firmwareVersion" placeholder="Versión (ej. 1.0.1)">
-            <input type="number" id="firmwareBuild" placeholder="Build (ej. 2)" min="1">
-            <input type="text" id="firmwareNotes" placeholder="Notas (opcional)">
+        <div>
+            <label for="imageLabel">Nombre (opcional)</label>
+            <input type="text" id="imageLabel" placeholder="Ej. logo estudio">
         </div>
-        <div class="uploader">
-            <button type="button" onclick="publishFirmware()">Publicar firmware</button>
-            <button type="button" class="secondary danger" onclick="unpublishFirmware()">Despublicar</button>
-        </div>
-        <div id="statusFirmware" class="status"></div>
-    </main>
+    </div>
+    <div class="actions">
+        <button type="button" id="uploadButton">Subir imagen</button>
+        <span class="empty">Se recorta y escala a 240×240 automáticamente.</span>
+    </div>
+    <div id="statusImages" class="status" role="status"></div>
+</section>
 
-    <script>
-        let currentConfig = null;
-        let images = [];
+<script>
+    let currentConfig = null;
+    let images = [];
 
-        function setStatus(id, message, isError) {
-            const node = document.getElementById(id);
-            node.innerText = message;
-            node.classList.toggle('error', Boolean(isError));
+    function setStatus(id, message, state) {
+        const node = document.getElementById(id);
+        node.textContent = message;
+        if (state) node.dataset.state = state;
+        else delete node.dataset.state;
+    }
+
+    async function loadConfig() {
+        const response = await fetch('/device/config/full');
+        currentConfig = await response.json();
+        document.getElementById('rgbEnabled').checked = currentConfig.rgb_enabled;
+        document.getElementById('filamentEnabled').checked = currentConfig.filament_enabled;
+        document.getElementById('displayEnabled').checked = currentConfig.display_enabled;
+        document.getElementById('rgbColor').value = currentConfig.rgb_color;
+        document.getElementById('colorValue').textContent = currentConfig.rgb_color;
+        document.getElementById('rgbBrightness').value = currentConfig.rgb_brightness;
+        document.getElementById('brightnessValue').textContent = currentConfig.rgb_brightness;
+        renderGallery();
+    }
+
+    async function saveConfig(changes, statusId) {
+        setStatus(statusId, 'Guardando…');
+        const response = await fetch('/device/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(changes)
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            setStatus(statusId, error.detail || 'Error al guardar.', 'error');
+            return false;
         }
+        currentConfig = await response.json();
+        setStatus(statusId, 'Guardado · revisión ' + currentConfig.revision, 'ok');
+        renderGallery();
+        return true;
+    }
 
-        async function loadConfig() {
-            const response = await fetch('/device/config/full');
-            currentConfig = await response.json();
-            document.getElementById('rgbEnabled').checked = currentConfig.rgb_enabled;
-            document.getElementById('filamentEnabled').checked = currentConfig.filament_enabled;
-            document.getElementById('displayEnabled').checked = currentConfig.display_enabled;
-            document.getElementById('rgbColor').value = currentConfig.rgb_color;
-            document.getElementById('rgbBrightness').value = currentConfig.rgb_brightness;
-            document.getElementById('brightnessValue').innerText = currentConfig.rgb_brightness;
-            renderGallery();
+    async function loadImages() {
+        const response = await fetch('/device/images');
+        images = await response.json();
+        renderGallery();
+    }
+
+    function renderGallery() {
+        const gallery = document.getElementById('gallery');
+        const selected = currentConfig ? currentConfig.image_id : null;
+        const tiles = [
+            '<div class="tile' + (selected ? '' : ' is-selected') + '" data-image="">' +
+            '<div class="placeholder">🙂</div><div class="tile-name">Cara animada</div></div>'
+        ];
+        for (const image of images) {
+            const remove = image.source === 'upload'
+                ? '<button type="button" class="danger tiny tile-remove" data-remove="' + image.id + '">Borrar</button>'
+                : '';
+            tiles.push(
+                '<div class="tile' + (image.id === selected ? ' is-selected' : '') + '" data-image="' + image.id + '">' +
+                '<img src="' + image.preview_url + '" alt="' + image.label + '" loading="lazy">' +
+                '<div class="tile-name">' + image.label + '</div>' + remove + '</div>'
+            );
         }
+        gallery.innerHTML = tiles.join('');
+    }
 
-        async function saveConfig(changes, statusId) {
-            setStatus(statusId, 'Guardando…');
-            const response = await fetch('/device/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(changes)
-            });
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                setStatus(statusId, error.detail || 'Error al guardar.', true);
-                return false;
-            }
-            currentConfig = await response.json();
-            setStatus(statusId, 'Guardado. Revisión ' + currentConfig.revision + '.');
-            renderGallery();
-            return true;
-        }
-
-        async function loadImages() {
-            const response = await fetch('/device/images');
-            images = await response.json();
-            renderGallery();
-        }
-
-        function renderGallery() {
-            const gallery = document.getElementById('gallery');
-            const selected = currentConfig ? currentConfig.image_id : null;
-            const cards = [
-                '<div class="card' + (selected ? '' : ' selected') + '" onclick="selectImage(null)">' +
-                '<div class="face">🙂</div><div class="name">Cara animada</div></div>'
-            ];
-            for (const image of images) {
-                const isSelected = image.id === selected ? ' selected' : '';
-                const remove = image.source === 'upload'
-                    ? '<button type="button" class="secondary danger remove" onclick="deleteImage(event, \'' + image.id + '\')">Borrar</button>'
-                    : '';
-                cards.push(
-                    '<div class="card' + isSelected + '" onclick="selectImage(\'' + image.id + '\')">' +
-                    '<img src="' + image.preview_url + '" alt="' + image.label + '" loading="lazy">' +
-                    '<div class="name">' + image.label + '</div>' + remove + '</div>'
-                );
-            }
-            gallery.innerHTML = cards.join('');
-        }
-
-        function selectImage(imageId) {
-            saveConfig(imageId ? { image_id: imageId } : { clear_image: true }, 'statusImages');
-        }
-
-        async function deleteImage(event, imageId) {
+    document.getElementById('gallery').addEventListener('click', async event => {
+        const removeButton = event.target.closest('[data-remove]');
+        if (removeButton) {
             event.stopPropagation();
             setStatus('statusImages', 'Borrando…');
-            const response = await fetch('/device/images/' + imageId, { method: 'DELETE' });
+            const response = await fetch('/device/images/' + removeButton.dataset.remove, { method: 'DELETE' });
             if (!response.ok) {
                 const error = await response.json().catch(() => ({}));
-                setStatus('statusImages', error.detail || 'No se pudo borrar.', true);
+                setStatus('statusImages', error.detail || 'No se pudo borrar.', 'error');
                 return;
             }
-            setStatus('statusImages', 'Imagen borrada.');
             await loadConfig();
             await loadImages();
+            setStatus('statusImages', 'Imagen borrada.', 'ok');
+            return;
         }
 
-        async function uploadImage() {
-            const input = document.getElementById('imageFile');
-            if (!input.files.length) { setStatus('statusImages', 'Elegí un archivo primero.', true); return; }
-            const body = new FormData();
-            body.append('file', input.files[0]);
-            body.append('label', document.getElementById('imageLabel').value);
-            setStatus('statusImages', 'Subiendo y convirtiendo a 240x240…');
-            const response = await fetch('/device/images', { method: 'POST', body });
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                setStatus('statusImages', error.detail || 'Error al subir la imagen.', true);
-                return;
-            }
-            const image = await response.json();
-            input.value = '';
-            document.getElementById('imageLabel').value = '';
-            await loadImages();
-            setStatus('statusImages', 'Imagen "' + image.label + '" lista.');
+        const tile = event.target.closest('[data-image]');
+        if (!tile) return;
+        const imageId = tile.dataset.image;
+        saveConfig(imageId ? { image_id: imageId } : { clear_image: true }, 'statusImages');
+    });
+
+    document.getElementById('uploadButton').addEventListener('click', async () => {
+        const input = document.getElementById('imageFile');
+        if (!input.files.length) {
+            setStatus('statusImages', 'Elegí un archivo primero.', 'error');
+            return;
         }
-
-        async function loadManifest() {
-            const response = await fetch('/ota/manifest');
-            const manifest = await response.json();
-            const node = document.getElementById('manifest');
-            if (!manifest.available) {
-                node.innerHTML = 'No hay firmware publicado. El ESP32 seguirá con el que tiene instalado.';
-                return;
-            }
-            node.innerHTML =
-                '<div>Versión: <b>' + manifest.version + '</b> (build ' + manifest.build + ')</div>' +
-                '<div>Tamaño: ' + (manifest.size / 1024).toFixed(1) + ' KB</div>' +
-                '<div>SHA-256: <code>' + manifest.sha256 + '</code></div>' +
-                '<div>Publicado: ' + manifest.uploaded_at + '</div>' +
-                (manifest.notes ? '<div>Notas: ' + manifest.notes + '</div>' : '');
+        const body = new FormData();
+        body.append('file', input.files[0]);
+        body.append('label', document.getElementById('imageLabel').value);
+        setStatus('statusImages', 'Subiendo y convirtiendo a 240×240…');
+        const response = await fetch('/device/images', { method: 'POST', body });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            setStatus('statusImages', error.detail || 'Error al subir la imagen.', 'error');
+            return;
         }
+        const image = await response.json();
+        input.value = '';
+        document.getElementById('imageLabel').value = '';
+        await loadImages();
+        setStatus('statusImages', 'Imagen «' + image.label + '» lista.', 'ok');
+    });
 
-        async function publishFirmware() {
-            const input = document.getElementById('firmwareFile');
-            const version = document.getElementById('firmwareVersion').value.trim();
-            const build = document.getElementById('firmwareBuild').value.trim();
-            if (!input.files.length) { setStatus('statusFirmware', 'Elegí el archivo firmware.bin.', true); return; }
-            if (!version || !build) { setStatus('statusFirmware', 'Completá versión y build.', true); return; }
-            const body = new FormData();
-            body.append('file', input.files[0]);
-            body.append('version', version);
-            body.append('build', build);
-            body.append('notes', document.getElementById('firmwareNotes').value);
-            setStatus('statusFirmware', 'Subiendo firmware…');
-            const response = await fetch('/ota/firmware', { method: 'POST', body });
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                setStatus('statusFirmware', error.detail || 'Error al publicar el firmware.', true);
-                return;
-            }
-            input.value = '';
-            await loadManifest();
-            setStatus('statusFirmware', 'Firmware publicado. El ESP32 lo tomará en su próximo arranque.');
-        }
+    document.getElementById('rgbEnabled').addEventListener('change', event =>
+        saveConfig({ rgb_enabled: event.target.checked }, 'statusConfig'));
+    document.getElementById('filamentEnabled').addEventListener('change', event =>
+        saveConfig({ filament_enabled: event.target.checked }, 'statusConfig'));
+    document.getElementById('displayEnabled').addEventListener('change', event =>
+        saveConfig({ display_enabled: event.target.checked }, 'statusConfig'));
+    document.getElementById('rgbColor').addEventListener('input', event =>
+        document.getElementById('colorValue').textContent = event.target.value.toUpperCase());
+    document.getElementById('rgbColor').addEventListener('change', event =>
+        saveConfig({ rgb_color: event.target.value }, 'statusConfig'));
+    document.getElementById('rgbBrightness').addEventListener('input', event =>
+        document.getElementById('brightnessValue').textContent = event.target.value);
+    document.getElementById('rgbBrightness').addEventListener('change', event =>
+        saveConfig({ rgb_brightness: Number(event.target.value) }, 'statusConfig'));
 
-        async function unpublishFirmware() {
-            setStatus('statusFirmware', 'Quitando firmware…');
-            await fetch('/ota/firmware', { method: 'DELETE' });
-            await loadManifest();
-            setStatus('statusFirmware', 'Firmware despublicado.');
-        }
-
-        document.getElementById('rgbEnabled').addEventListener('change', event =>
-            saveConfig({ rgb_enabled: event.target.checked }, 'statusConfig'));
-        document.getElementById('filamentEnabled').addEventListener('change', event =>
-            saveConfig({ filament_enabled: event.target.checked }, 'statusConfig'));
-        document.getElementById('displayEnabled').addEventListener('change', event =>
-            saveConfig({ display_enabled: event.target.checked }, 'statusConfig'));
-        document.getElementById('rgbColor').addEventListener('change', event =>
-            saveConfig({ rgb_color: event.target.value }, 'statusConfig'));
-        document.getElementById('rgbBrightness').addEventListener('input', event =>
-            document.getElementById('brightnessValue').innerText = event.target.value);
-        document.getElementById('rgbBrightness').addEventListener('change', event =>
-            saveConfig({ rgb_brightness: Number(event.target.value) }, 'statusConfig'));
-
-        loadConfig().then(loadImages).then(loadManifest);
-    </script>
-</body>
-</html>
+    loadConfig().then(loadImages);
+</script>

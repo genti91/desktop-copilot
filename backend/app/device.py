@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
 
 from .config import BASE_DIR
@@ -28,7 +28,6 @@ IMAGE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{0,63}$")
 HEX_COLOR_PATTERN = re.compile(r"^#?[0-9a-fA-F]{6}$")
 
 DEFAULT_IMAGES_DIR = BASE_DIR / "app" / "assets" / "default_images"
-DEVICE_TEMPLATE = BASE_DIR / "app" / "templates" / "device.html"
 DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "images"
 FIRMWARE_DIR = DATA_DIR / "firmware"
@@ -107,7 +106,7 @@ def _require_image_path(image_id: str) -> Path:
 
 
 def _humanize(image_id: str) -> str:
-    label = re.sub(r"^(\d+|up)-", "", image_id).replace("-", " ").strip()
+    label = re.sub(r"-+", " ", re.sub(r"^(\d+|up)-", "", image_id)).strip()
     return label[:1].upper() + label[1:] if label else image_id
 
 
@@ -426,13 +425,3 @@ def unpublish_firmware():
     FIRMWARE_BINARY.unlink(missing_ok=True)
     MANIFEST_PATH.unlink(missing_ok=True)
     return {"status": "deleted"}
-
-
-# --------------------------------------------------------------------------- #
-# Página de configuración
-# --------------------------------------------------------------------------- #
-
-
-@router.get("/device", response_class=HTMLResponse)
-def get_device_page():
-    return HTMLResponse(content=DEVICE_TEMPLATE.read_text(encoding="utf-8"))

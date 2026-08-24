@@ -112,7 +112,10 @@ void setup() {
 
 void loop() {
   updateAudioPlayback();
-  if (!mp3->isRunning()) updateDeviceSettings();
+  if (!mp3->isRunning()) {
+    updateDeviceSettings();
+    updateFirmwareCheck();
+  }
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
     delay(50);

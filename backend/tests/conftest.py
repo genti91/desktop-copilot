@@ -18,6 +18,12 @@ from app import device  # noqa: E402
 
 
 @pytest.fixture
+def anyio_backend():
+    """anyio corre los tests async; acá sólo nos interesa asyncio."""
+    return "asyncio"
+
+
+@pytest.fixture
 def data_dir(tmp_path, monkeypatch):
     """Redirige el almacenamiento del dispositivo a un directorio temporal."""
     uploads = tmp_path / "images"

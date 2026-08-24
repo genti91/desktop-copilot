@@ -1,0 +1,92 @@
+name: Firmware
+
+# Compila el firmware en cada push a main y lo publica como release.
+# El backend espeja ese release y el ESP32 se actualiza solo desde el backend.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+      - '.github/scripts/firmware_manifest.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # El build sale de la cantidad de commits, asi que hace falta el historial completo.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cachear PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Instalar PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Compilar
+        working-directory: firmware
+        run: pio run -e xiao_esp32s3
+
+      - name: Generar manifest
+        id: manifest
+        env:
+          FIRMWARE_NOTES: ${{ github.event.head_commit.message }}
+        run: python .github/scripts/firmware_manifest.py
+
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.manifest.outputs.tag }}
+          VERSION: ${{ steps.manifest.outputs.version }}
+          BUILD: ${{ steps.manifest.outputs.build }}
+        run: |
+          BIN=firmware/.pio/build/xiao_esp32s3/firmware.bin
+          MANIFEST=firmware/.pio/build/xiao_esp32s3/manifest.json
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "El release $TAG ya existe; sobrescribo los assets."
+            gh release upload "$TAG" "$BIN" "$MANIFEST" --clobber
+          else
+            gh release create "$TAG" "$BIN" "$MANIFEST" \
+              --title "Firmware $VERSION (build $BUILD)" \
+              --notes "Compilado desde ${GITHUB_SHA:0:7}.
+
+          El backend lo espeja automaticamente y el ESP32 se actualiza por OTA
+          en su proximo chequeo (arranque o cada 15 minutos en reposo)."
+          fi
+
+      - name: Resumen
+        env:
+          TAG: ${{ steps.manifest.outputs.tag }}
+          BUILD: ${{ steps.manifest.outputs.build }}
+          SIZE: ${{ steps.manifest.outputs.size }}
+          SHA256: ${{ steps.manifest.outputs.sha256 }}
+        run: |
+          {
+            echo "### Firmware publicado"
+            echo ""
+            echo "- Release: \`$TAG\`"
+            echo "- Build: \`$BUILD\`"
+            echo "- Tamano: \`$SIZE\` bytes"
+            echo "- SHA-256: \`$SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
