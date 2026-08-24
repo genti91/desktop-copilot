@@ -9,6 +9,7 @@ uint8_t* pcm_buffer = NULL;
 AudioGeneratorMP3* mp3 = NULL;
 AudioFileSourceLittleFS* file = NULL;
 AudioOutputI2S* out = NULL;
+uint32_t playbackStartedMs = 0;
 
 namespace {
 void initMicrophone() {
@@ -109,7 +110,8 @@ void updateAudioPlayback() {
       delete file;
       file = NULL;
     }
-    Serial.println("✅ Reproducción del MP3 finalizada.");
+    Serial.printf("✅ Reproducción finalizada tras %lu ms.\n",
+                  (unsigned long)(millis() - playbackStartedMs));
     setFaceMode(FACE_IDLE);
   }
 }

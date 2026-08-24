@@ -17,11 +17,11 @@ constexpr uint32_t REQUEST_TIMEOUT_MS = 20000;
 // Espera máxima por el lock si la tarea de mantenimiento está usando la red.
 constexpr uint32_t NETWORK_LOCK_WAIT_MS = 8000;
 
-// El cuerpo multipart se arma entero en PSRAM. Antes se escribía a mano sobre el
-// socket, pero la respuesta también se parseaba a mano, y eso no sobrevive a un
-// proxy que responde con Transfer-Encoding: chunked (Tailscale Funnel lo hace):
-// las cabeceras de cada chunk terminaban dentro del MP3. Con HTTPClient el
-// framing lo resuelve la librería.
+// El cuerpo multipart se arma entero en PSRAM y la respuesta la lee HTTPClient.
+// Antes ambas cosas se hacían a mano sobre el socket: funcionaba hablándole
+// directo a uvicorn, pero deja al firmware a merced de cualquier detalle de
+// framing (chunked, keep-alive, particularidades de leer sobre TLS) que meta un
+// proxy en el medio. Con HTTPClient eso lo resuelve la librería.
 uint8_t* requestBuffer = NULL;
 size_t requestCapacity = 0;
 
@@ -66,11 +66,14 @@ size_t buildMultipartBody(size_t recordedPcmBytes) {
   return offset;
 }
 
-void startPlayback() {
-  Serial.println("🔊 Respuesta guardada en flash. Reproduciendo...");
+void startPlayback(size_t fileSize) {
   setFaceMode(FACE_SPEAKING);
   file = new AudioFileSourceLittleFS(RESPONSE_PATH);
-  mp3->begin(file, out);
+  bool started = mp3->begin(file, out);
+  playbackStartedMs = millis();
+  Serial.printf("🔊 Reproduciendo %u bytes (begin=%s).\n",
+                (unsigned)fileSize, started ? "ok" : "FALLÓ");
+  if (!started) setFaceMode(FACE_IDLE);
 }
 
 }  // namespace
@@ -144,10 +147,10 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   String action = http.header("X-Action");
   http.end();
-  backendUnlock();
 
   if (written <= 0) {
     Serial.printf("❌ No llegó cuerpo en la respuesta (%d).\n", written);
+    backendUnlock();
     setFaceMode(FACE_IDLE);
     return;
   }
@@ -160,11 +163,17 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   if (fileSize == 0) {
     Serial.println("❌ El MP3 quedó vacío en flash.");
+    backendUnlock();
     setFaceMode(FACE_IDLE);
     return;
   }
-  Serial.printf("⬇️ %u bytes recibidos.\n", (unsigned)fileSize);
 
   if (action.length() > 0) executeDeviceCommand(action);
-  startPlayback();
+  startPlayback(fileSize);
+
+  // El lock se suelta recién acá. Si se soltaba antes, la tarea de mantenimiento
+  // veía mp3->isRunning() todavía en false, arrancaba un handshake TLS —CPU pura
+  // en el mismo núcleo que loop()— y le robaba el procesador al decodificador
+  // justo en los primeros segundos de la reproducción.
+  backendUnlock();
 }
