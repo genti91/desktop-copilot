@@ -11,6 +11,15 @@
 #define PIN_RGB D4
 #define PIN_LED D5
 #define PIN_TFT_BL D6
+// Pines del panel. Antes vivian en las build_flags de TFT_eSPI; con LovyanGFX
+// la configuracion es codigo, asi que van con el resto del hardware.
+#define PIN_TFT_SCLK 7
+#define PIN_TFT_MOSI 9
+#define PIN_TFT_DC 8
+#define PIN_TFT_RST 44
+
+constexpr uint16_t SCREEN_W = 240;
+constexpr uint16_t SCREEN_H = 240;
 #define NUMPIXELS 1
 
 #define SAMPLE_RATE 16000

@@ -1,19 +1,26 @@
+// WiFi.h primero: ver la nota en backend.h sobre el orden de los includes.
+#include <WiFi.h>
+
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
-#include <WiFi.h>
 #include "audio.h"
 #include "backend.h"
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
-#include "network.h"
+#include "voice.h"
+#include "tailnet.h"
 
 namespace {
 
 constexpr const char* RESPONSE_PATH = "/response.mp3";
 constexpr const char* BOUNDARY = "----ESP32Boundary987654321";
-constexpr uint32_t REQUEST_TIMEOUT_MS = 20000;
+// El backend encadena cuatro APIs remotas (STT, embeddings, el modelo y el TTS).
+// Medido sobre la Pi: entre 5 y 11 s lo habitual, pero con cola larga —Gemini
+// solo pasa de 1.6 a 8.3 s entre pedidos consecutivos, y un pedido medido tardo
+// 30 s—. Con 20 s se perdian respuestas que el backend igual estaba generando.
+constexpr uint32_t REQUEST_TIMEOUT_MS = 45000;
 // Espera máxima por el lock si la tarea de mantenimiento está usando la red.
 constexpr uint32_t NETWORK_LOCK_WAIT_MS = 8000;
 
@@ -212,9 +219,11 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   http.setReuse(false);
 
   Serial.printf("📡 Enviando %u bytes a %s (%s)...\n", (unsigned)bodyLength,
-                backendHost().c_str(), backendUsesTls() ? "TLS" : "sin cifrar");
+                backendHost().c_str(), tailnetEnabled() ? "tailnet" : "LAN");
 
-  if (!beginBackendRequest(http, String(server_url))) {
+  // La URL sale de backendVoiceUrl() y no de server_url porque dentro del
+  // tailnet el host viaja ya resuelto a su IP 100.x.
+  if (!beginBackendRequest(http, backendVoiceUrl())) {
     Serial.println("❌ Error al preparar el pedido.");
     backendUnlock();
     setFaceMode(FACE_IDLE);
@@ -277,15 +286,15 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   if (action.length() > 0) executeDeviceCommand(action);
   startPlayback(fileSize);
 
-  // El desmontaje de TLS va despues de que la reproduccion abrio su archivo.
-  // Al reves, el descriptor recien abierto quedaba invalido: getPos() devolvia
-  // -1 en el primer loop() del decodificador, y solo reabrirlo lo arreglaba.
+  // Cerrar el socket va despues de que la reproduccion abrio su archivo. Al
+  // reves, el descriptor recien abierto quedaba invalido: getPos() devolvia -1
+  // en el primer loop() del decodificador, y solo reabrirlo lo arreglaba.
   backendDisconnect();
 
   // El lock se suelta recién acá. Si se soltaba antes, la tarea de mantenimiento
-  // veía mp3->isRunning() todavía en false, arrancaba un handshake TLS —CPU pura
-  // en el mismo núcleo que loop()— y le robaba el procesador al decodificador
-  // justo en los primeros segundos de la reproducción.
+  // veía mp3->isRunning() todavía en false, salía a la red en el mismo núcleo
+  // que loop() y le robaba el procesador al decodificador justo en los primeros
+  // segundos de la reproducción.
   backendUnlock();
 }
 

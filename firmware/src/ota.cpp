@@ -1,8 +1,10 @@
+// WiFi.h primero: ver la nota en backend.h sobre el orden de los includes.
+#include <WiFi.h>
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <Update.h>
-#include <WiFi.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/version.h>
 #include "backend.h"

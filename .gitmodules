@@ -1,0 +1,7 @@
+[submodule "firmware/third_party/microlink"]
+	path = firmware/third_party/microlink
+	url = https://github.com/antonmeyer/microlink.git
+	# Apunta a la rama de la PR CamM2325/microlink#28 y no a upstream: sin ese
+	# arreglo, wireguardif.c inyecta los paquetes recibidos llamando a ip_input()
+	# desde su propia tarea en vez del hilo TCP/IP de lwIP, y la placa se reinicia
+	# a mitad de una transferencia. Volver a upstream cuando se mergee.

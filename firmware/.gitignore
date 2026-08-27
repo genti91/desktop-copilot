@@ -3,3 +3,11 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# PlatformIO genera el sdkconfig del entorno a partir de sdkconfig.defaults.
+sdkconfig.*
+!sdkconfig.defaults
+
+# Los baja el component manager de IDF como dependencias del componente Arduino.
+managed_components/
+dependencies.lock

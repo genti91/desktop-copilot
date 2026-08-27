@@ -108,6 +108,10 @@ fi
 
 say "Servicio de systemd"
 UNIT_TEMPLATE="$INSTALL_DIR/deploy/$SERVICE_NAME.service"
+# Rodeo mientras el ESP32 no pueda iniciar el handshake de WireGuard.
+# Ver docs/raspberry-pi.md, "El ESP32 desde cualquier red".
+KEEPALIVE_NAME="$SERVICE_NAME-keepalive"
+KEEPALIVE_UNIT="$INSTALL_DIR/deploy/$KEEPALIVE_NAME.service"
 [ -f "$UNIT_TEMPLATE" ] || die "No encontré $UNIT_TEMPLATE"
 
 # La plantilla viene con el usuario 'pi'; la ajustamos a quien esté instalando.
@@ -126,8 +130,9 @@ if [ "$HAVE_SUDO" -eq 0 ]; then
   cat <<PENDIENTE
 
   sudo cp $GENERATED_UNIT /etc/systemd/system/$SERVICE_NAME.service
+  sudo cp $KEEPALIVE_UNIT /etc/systemd/system/$KEEPALIVE_NAME.service
   sudo systemctl daemon-reload
-  sudo systemctl enable --now $SERVICE_NAME
+  sudo systemctl enable --now $SERVICE_NAME $KEEPALIVE_NAME
 
 PENDIENTE
   echo "Y verificá con:  curl -s localhost:$PORT/health"
@@ -136,9 +141,12 @@ fi
 
 sudo cp "$GENERATED_UNIT" "/etc/systemd/system/$SERVICE_NAME.service"
 rm -f "$GENERATED_UNIT"
+sudo cp "$KEEPALIVE_UNIT" "/etc/systemd/system/$KEEPALIVE_NAME.service"
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME" >/dev/null
 sudo systemctl restart "$SERVICE_NAME"
+sudo systemctl enable "$KEEPALIVE_NAME" >/dev/null
+sudo systemctl restart "$KEEPALIVE_NAME"
 
 # --------------------------------------------------------------------------- #
 

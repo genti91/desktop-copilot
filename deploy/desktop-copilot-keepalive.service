@@ -1,0 +1,42 @@
+[Unit]
+Description=Mantiene viva la sesion WireGuard con el ESP32
+Documentation=https://github.com/genti91/desktop-copilot
+After=tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=simple
+
+# Esto es un rodeo, no una pieza del diseno.
+#
+# El ESP32 corre MicroLink, un cliente de Tailscale para ESP-IDF, y no consigue
+# INICIAR el handshake de WireGuard contra tailscaled: sus initiations se
+# descartan en silencio, tanto por el camino directo como por DERP. Al reves
+# funciona perfecto: cuando la Pi inicia, el tunel levanta y el dispositivo
+# conecta al backend en ~16 ms.
+#
+# Un ping cada 30 s alcanza para que la sesion nunca caduque —WireGuard la
+# descarta recien a los ~180 s de inactividad—, asi que el ESP32 siempre
+# encuentra el tunel armado cuando le toca hablar.
+#
+# Cuando se arregle upstream, esto se saca entero:
+#   sudo systemctl disable --now desktop-copilot-keepalive
+ExecStart=/bin/ping -i 30 desktop-copilot
+
+Restart=always
+RestartSec=10
+
+# Que el keepalive no le gane prioridad ni al gcode ni al backend.
+Nice=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+StandardOutput=null
+StandardError=journal
+SyslogIdentifier=copilot-keepalive
+
+[Install]
+WantedBy=multi-user.target

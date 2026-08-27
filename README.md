@@ -31,6 +31,8 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
   - Reproduce la respuesta TTS del asistente.
   - Ejecuta comandos de luces recibidos en el header HTTP `X-Action`.
   - Sondea la configuracion remota y aplica colores, encendidos e imagen de pantalla.
+  - Entra al tailnet de Tailscale por su cuenta (MicroLink) y le habla al backend
+    punto a punto, sin exponerlo a internet.
   - Se autoactualiza por OTA si el backend publico un build mas nuevo, sin intervencion.
 
 ## Estado actual
@@ -54,7 +56,7 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
 
 ```text
 ESP32 (mic + speaker + LEDs)
-  -> envia WAV por HTTP multipart
+  -> envia WAV por HTTP multipart, dentro del tunel WireGuard del tailnet
 FastAPI (/voice-assistant)
   -> STT (Groq Whisper)
   -> RAG (Gemini Embeddings + ChromaDB)
@@ -273,8 +275,26 @@ Sigue disponible como alternativa: compilar con `pio run -e xiao_esp32s3` y subi
 `firmware/.pio/build/xiao_esp32s3/firmware.bin` desde `/firmware`, con un build
 mayor al instalado.
 
-La particion `default_8MB.csv` del board ya reserva `app0`/`app1` (3.1 MB cada una),
-asi que no hace falta tocar el esquema de particiones.
+`firmware/partitions.csv` reserva `app0`/`app1` (3.1 MB cada una), asi que no hace
+falta tocar el esquema de particiones.
+
+### Compilar el firmware
+
+MicroLink es un submodulo, asi que un clon nuevo necesita:
+
+```bash
+git submodule update --init --recursive
+```
+
+Arduino compila como componente de ESP-IDF, y eso trae dos requisitos que el
+framework precompilado no tenia:
+
+- **En Windows hay que compilar desde PowerShell o cmd, no desde Git Bash.** El
+  instalador de herramientas de ESP-IDF (`idf_tools.py`) se niega a correr bajo
+  MSys/Mingw, y el build falla al no encontrar cmake ni ninja.
+- El component manager de IDF descarga dependencias a `firmware/managed_components/`.
+  Un antivirus que retenga esos archivos recien extraidos hace fallar la
+  descompresion; si pasa, borra el directorio y volve a compilar.
 
 ## Hostear en una Raspberry Pi
 
@@ -285,11 +305,13 @@ Guia completa: [docs/raspberry-pi.md](docs/raspberry-pi.md). Resumen:
 
 ```text
 tu celular / laptop  -> Tailscale -> Raspberry Pi :8000  (panel con password)
-ESP32 (misma casa)   -> IP local de la Pi :8000          (no pasa por el tunel)
+ESP32 (en cualquier lado) -> Tailscale -> Raspberry Pi :8000
 ```
 
-El ESP32 se queda en la LAN a proposito: el firmware habla HTTP plano, no tiene
-TLS, asi que una URL `https://` del tunel no le funcionaria.
+El ESP32 tambien es un nodo del tailnet: corre
+[MicroLink](https://github.com/CamM2325/microlink), un cliente de Tailscale para
+ESP-IDF. DISCO abre un camino UDP directo contra la Pi, asi que el audio no da
+la vuelta por un relay y el backend no queda publicado en internet.
 
 Instalacion en un comando sobre la Pi:
 

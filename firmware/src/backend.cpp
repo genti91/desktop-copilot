@@ -1,61 +1,32 @@
-#include <LittleFS.h>
-#include <WiFiClientSecure.h>
-#include "backend.h"
+// WiFi.h primero: ver la nota en backend.h sobre el orden de los includes.
+#include <WiFi.h>
 
-char server_url[SERVER_URL_SIZE] = "https://octopi.taile9bb1c.ts.net/voice-assistant";
+#include <LittleFS.h>
+#include "backend.h"
+#include "tailnet.h"
+
+char server_url[SERVER_URL_SIZE] = "http://octopi:8000/voice-assistant";
 // Vacio a proposito: el token es un secreto y este repo es publico. Se carga
 // desde /config.txt, que se completa una vez desde el portal cautivo y
 // sobrevive a los flasheos porque LittleFS no se borra al subir firmware.
+// Lo mismo vale para la auth key del tailnet, que vive en tailnet.cpp.
 char device_token[DEVICE_TOKEN_SIZE] = "";
 
 namespace {
 
 constexpr const char* CONFIG_PATH = "/config.txt";
 
-// ISRG Root X1: Tailscale Funnel sirve certificados de Let's Encrypt, que
-// encadenan a esta raiz. Vence en junio de 2035.
-const char LETSENCRYPT_ROOT_CA[] PROGMEM =
-    "-----BEGIN CERTIFICATE-----\n"
-    "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\n"
-    "-----END CERTIFICATE-----\n";
-
 WiFiClient plainClient;
-WiFiClientSecure secureClient;
-bool secureClientReady = false;
 SemaphoreHandle_t backendMutex = NULL;
 
+// El firmware habla HTTP plano y nada mas: adentro del tailnet cifra WireGuard,
+// y en la LAN nunca hizo falta. Un https:// configurado a mano se normaliza a
+// http:// en vez de fallar callado.
 String normalizedUrl() {
   String url = String(server_url);
   url.trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
+  if (url.startsWith("https://")) url = "http://" + url.substring(8);
+  if (!url.startsWith("http://")) url = "http://" + url;
   return url;
 }
 
@@ -66,11 +37,27 @@ String authority() {
   return pathStart > 0 ? url.substring(schemeEnd, pathStart) : url.substring(schemeEnd);
 }
 
-}  // namespace
+// Se cachea porque resolver es mirar la tabla de peers, y la tabla recien esta
+// completa un rato despues de conectar: un resultado vacio no se guarda, asi el
+// proximo pedido lo vuelve a intentar.
+String resolvedHost;
 
-bool backendUsesTls() {
-  return normalizedUrl().startsWith("https://");
+// Host al que hay que abrir el socket. Fuera del tailnet es el configurado; con
+// el tailnet arriba es su IP 100.x, porque el ESP32 no tiene MagicDNS.
+String connectHost() {
+  String host = backendHost();
+  if (!tailnetEnabled()) return host;
+
+  if (resolvedHost.length() == 0) {
+    String resolved = tailnetResolve(host);
+    if (resolved.length() == 0) return host;
+    if (resolved != host) Serial.printf("🔗 %s resuelve a %s\n", host.c_str(), resolved.c_str());
+    resolvedHost = resolved;
+  }
+  return resolvedHost;
 }
+
+}  // namespace
 
 String backendHost() {
   String host = authority();
@@ -81,8 +68,7 @@ String backendHost() {
 uint16_t backendPort() {
   String host = authority();
   int colonIndex = host.indexOf(':');
-  // Funnel expone https sin puerto explicito, asi que hay que asumir el default.
-  if (colonIndex < 0) return backendUsesTls() ? 443 : 80;
+  if (colonIndex < 0) return 80;
   return host.substring(colonIndex + 1).toInt();
 }
 
@@ -94,24 +80,23 @@ String backendPath() {
 }
 
 String backendBaseUrl() {
-  String url = normalizedUrl();
-  int schemeEnd = url.indexOf("://") + 3;
-  int pathStart = url.indexOf('/', schemeEnd);
-  return pathStart > 0 ? url.substring(0, pathStart) : url;
+  String origin = "http://" + connectHost();
+
+  // El puerto se omite cuando es el 80, igual que hacia el recorte de la URL
+  // configurada: hay servidores que miran el Host y no les cae bien uno de mas.
+  uint16_t port = backendPort();
+  if (port != 80) origin += ":" + String(port);
+
+  return origin;
+}
+
+String backendVoiceUrl() {
+  return backendBaseUrl() + backendPath();
 }
 
 WiFiClient& backendTransport() {
-  if (!backendUsesTls()) {
-    plainClient.stop();
-    return plainClient;
-  }
-
-  secureClient.stop();
-  if (!secureClientReady) {
-    secureClient.setCACert(LETSENCRYPT_ROOT_CA);
-    secureClientReady = true;
-  }
-  return secureClient;
+  plainClient.stop();
+  return plainClient;
 }
 
 void initBackend() {
@@ -130,7 +115,6 @@ void backendUnlock() {
 
 void backendDisconnect() {
   plainClient.stop();
-  secureClient.stop();
 }
 
 void writeDeviceTokenHeader(WiFiClient& client) {
@@ -139,6 +123,11 @@ void writeDeviceTokenHeader(WiFiClient& client) {
 }
 
 bool beginBackendRequest(HTTPClient& http, const String& url) {
+  // Antes de abrir el socket: sin sesion de WireGuard viva contra el peer, lwIP
+  // rutea el 100.x por el netif del tunel y connect() vuelve con EHOSTUNREACH.
+  // tailnetEnsurePeer() no hace nada si el tunel se uso hace poco.
+  if (tailnetEnabled()) tailnetEnsurePeer(connectHost(), backendPort());
+
   if (!http.begin(backendTransport(), url)) return false;
   if (device_token[0] != 0) http.addHeader("X-Device-Token", device_token);
   return true;
@@ -162,6 +151,11 @@ void loadBackendConfig() {
   strlcpy(device_token, loadedToken.c_str(), sizeof(device_token));
   if (device_token[0] != 0) Serial.println("Token del dispositivo cargado desde flash.");
 
+  String loadedAuthKey = configFile.readStringUntil('\n');
+  loadedAuthKey.trim();
+  strlcpy(tailnet_auth_key, loadedAuthKey.c_str(), sizeof(tailnet_auth_key));
+  if (tailnet_auth_key[0] != 0) Serial.println("Auth key del tailnet cargada desde flash.");
+
   configFile.close();
 }
 
@@ -173,6 +167,7 @@ void saveBackendConfig() {
   }
   configFile.println(server_url);
   configFile.println(device_token);
+  configFile.println(tailnet_auth_key);
   configFile.close();
   Serial.println("Configuracion del backend guardada en LittleFS.");
 }

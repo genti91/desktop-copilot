@@ -119,8 +119,8 @@ void updateFace() {
 }
 }
 
-TFT_eSPI tft = TFT_eSPI();
-TFT_eSprite faceCanvas = TFT_eSprite(&tft);
+Panel240 tft;
+LGFX_Sprite faceCanvas(&tft);
 
 void configModeCallback(WiFiManager* wifiManager) {
   Serial.println("Entrando a Modo Configuracion WiFi");
@@ -128,7 +128,9 @@ void configModeCallback(WiFiManager* wifiManager) {
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.drawCentreString("Sin conexion", SCREEN_W / 2, 40, 1);
+  // Sirve para los dos casos: el Wi-Fi que no conecta y el portal abierto a mano
+  // desde el sensor tactil.
+  tft.drawCentreString("Configuracion", SCREEN_W / 2, 40, 1);
   tft.drawCentreString("Conectate al WiFi:", SCREEN_W / 2, 80, 1);
 
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
