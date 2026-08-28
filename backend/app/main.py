@@ -163,7 +163,8 @@ async def voice_assistant(
                 continue
             buffer += fragment
             full_text += fragment
-            pending_chunks, buffer = split_ready_sentences(buffer)
+            # Sin mínimo: acá lo que se mide es cuánto tarda en empezar a sonar.
+            pending_chunks, buffer = split_ready_sentences(buffer, min_chars=0)
             if pending_chunks:
                 break
         else:

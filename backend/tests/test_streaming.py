@@ -21,10 +21,18 @@ def test_corta_en_el_punto_y_deja_el_resto_pendiente():
 def test_junta_oraciones_cortas_en_un_solo_pedazo():
     # Tres oraciones de pocas palabras: sintetizarlas por separado costaría más
     # que hacerlo junto, así que se acumulan hasta llegar al mínimo.
-    texto = "Sí. Claro. Dale, lo anoto para más tarde así no se pierde. Listo"
+    texto = "Sí. Claro. Dale, lo anoto para más tarde así no se pierde nada de eso. Listo"
     ready, buffer = split_ready_sentences(texto)
-    assert ready == ["Sí. Claro. Dale, lo anoto para más tarde así no se pierde."]
+    assert ready == ["Sí. Claro. Dale, lo anoto para más tarde así no se pierde nada de eso."]
     assert buffer == "Listo"
+
+
+def test_sin_minimo_entrega_la_primera_oracion_por_corta_que_sea():
+    # Es como se llama en la primera etapa: ahí lo que importa es arrancar a
+    # sonar, no ahorrar llamadas a la síntesis.
+    ready, buffer = split_ready_sentences("Dale. Ahora te cuento el resto", min_chars=0)
+    assert ready == ["Dale."]
+    assert buffer == "Ahora te cuento el resto"
 
 
 def test_flush_entrega_la_oracion_sin_terminar():
@@ -42,8 +50,9 @@ def test_el_comando_viaja_en_el_primer_pedazo():
 
 
 def test_corta_en_los_saltos_de_linea():
-    ready, buffer = split_ready_sentences("Primer punto que ocupa bastante espacio\nSegundo")
-    assert ready == ["Primer punto que ocupa bastante espacio"]
+    texto = "Primer punto que ocupa bastante espacio y todavía sigue un poco más\nSegundo"
+    ready, buffer = split_ready_sentences(texto)
+    assert ready == ["Primer punto que ocupa bastante espacio y todavía sigue un poco más"]
     assert buffer == "Segundo"
 
 

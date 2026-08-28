@@ -21,11 +21,21 @@ _SENTENCE_END = re.compile(r"(?<=[.!?…:;])\s+|\n+")
 _MIN_CHUNK_CHARS = 60
 
 
-def split_ready_sentences(buffer: str, *, flush: bool = False) -> tuple[list[str], str]:
+def split_ready_sentences(
+    buffer: str,
+    *,
+    flush: bool = False,
+    min_chars: int = _MIN_CHUNK_CHARS,
+) -> tuple[list[str], str]:
     """Parte lo que ya está cerrado y devuelve el resto sin cerrar.
 
     Con flush=True se entrega todo, aunque la última oración no haya terminado:
     es lo que corresponde cuando el modelo dejó de escribir.
+
+    min_chars=0 corta en la primera oración por corta que sea. Vale la pena para
+    el primer pedazo y sólo para ese: ahí lo que se mide es cuánto tarda en
+    empezar a sonar, y una respuesta que arranca con "Dale." tiene que salir ya.
+    De la segunda en adelante el audio ya está sonando, así que conviene juntar.
     """
     pieces = _SENTENCE_END.split(buffer)
     if not flush:
@@ -41,7 +51,7 @@ def split_ready_sentences(buffer: str, *, flush: bool = False) -> tuple[list[str
         if not piece:
             continue
         pending = f"{pending} {piece}".strip() if pending else piece
-        if len(pending) >= _MIN_CHUNK_CHARS:
+        if len(pending) >= min_chars:
             ready.append(pending)
             pending = ""
 
