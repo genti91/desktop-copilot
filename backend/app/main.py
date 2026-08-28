@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -86,6 +87,12 @@ async def voice_assistant(
     background_tasks: BackgroundTasks = None,
     session_id: str = Form("esp32_session"),
 ):
+    started = time.perf_counter()
+    stages: dict[str, float] = {}
+
+    def mark(name: str):
+        stages[name] = time.perf_counter() - started
+
     audio_bytes = await file.read()
     sessions.setdefault(session_id, [])
 
@@ -115,8 +122,10 @@ async def voice_assistant(
             user_text = transcription.text.strip()
         except Exception as error:
             print(f"[Groq STT Error]: {error}")
+    mark("stt")
 
     context_text = await asyncio.to_thread(_retrieve_context, user_text)
+    mark("rag")
     system_instruction = f"""
     {state_memory["assistant_personality"]}
     Sos capaz de recordar notas de reuniones y controlar las luces de su escritorio.
@@ -161,6 +170,8 @@ async def voice_assistant(
             fragment = getattr(piece, "text", None) or ""
             if not fragment:
                 continue
+            if "gemini1" not in stages:
+                mark("gemini1")
             buffer += fragment
             full_text += fragment
             # Sin mínimo: acá lo que se mide es cuánto tarda en empezar a sonar.
@@ -190,11 +201,17 @@ async def voice_assistant(
             state_memory["last_project_name"],
         )
 
+    spoken_chunks = 0
+
     async def speak(chunk: str):
+        nonlocal spoken_chunks
         spoken = _spoken_text(chunk)
         if not spoken:
             return
+        spoken_chunks += 1
         async for audio in stream_speech_bytes(spoken):
+            if "audio1" not in stages:
+                mark("audio1")
             yield audio
 
     async def audio_body():
@@ -242,6 +259,13 @@ async def voice_assistant(
         response_text = _spoken_text(full_text)
         sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
         sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
+
+        mark("fin")
+        print(
+            "[voz] "
+            + "  ".join(f"{name}={value:.2f}s" for name, value in stages.items())
+            + f"  pedazos={spoken_chunks}  texto={len(response_text)}"
+        )
 
     return StreamingResponse(
         audio_body(),
