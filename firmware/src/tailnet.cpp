@@ -5,6 +5,7 @@
 
 #include "esp_log.h"
 #include "microlink.h"
+#include "nvs.h"
 
 char tailnet_auth_key[TAILNET_AUTH_KEY_SIZE] = "";
 
@@ -64,8 +65,30 @@ void onStateChange(microlink_t* handle, microlink_state_t state, void* userData)
 
 }  // namespace
 
+// La auth key es una credencial de alta, no de funcionamiento. MicroLink guarda
+// la identidad del nodo —machine key, WireGuard y DISCO— en su propio namespace
+// de NVS, y en el registro incluye la auth key solo si no esta vacia
+// (ml_coord.c: `if (ml->config.auth_key && strlen(...) > 0)`). Un nodo ya dado
+// de alta se vuelve a conectar con las claves guardadas.
+//
+// Esto dejo de ser teorico: al achicar la particion de LittleFS se perdio
+// /config.txt con la auth key adentro, y el aparato quedo sin tailnet aunque su
+// identidad seguia intacta en NVS, que esta en otra region y no se toco. Exigir
+// la auth key para siempre convierte cualquier perdida del sistema de archivos
+// en un re-alta manual.
+bool tailnetHasStoredIdentity() {
+  nvs_handle_t nvs;
+  if (nvs_open("microlink", NVS_READONLY, &nvs) != ESP_OK) return false;
+
+  uint8_t machineKey[32];
+  size_t largo = sizeof(machineKey);
+  const bool existe = nvs_get_blob(nvs, "machine_pri", machineKey, &largo) == ESP_OK;
+  nvs_close(nvs);
+  return existe;
+}
+
 bool tailnetEnabled() {
-  return tailnet_auth_key[0] != 0;
+  return tailnet_auth_key[0] != 0 || tailnetHasStoredIdentity();
 }
 
 bool tailnetConnected() {

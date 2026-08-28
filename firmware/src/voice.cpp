@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
-#include <LittleFS.h>
 #include "audio.h"
 #include "backend.h"
 #include "commands.h"
@@ -14,7 +13,6 @@
 
 namespace {
 
-constexpr const char* RESPONSE_PATH = "/response.mp3";
 constexpr const char* BOUNDARY = "----ESP32Boundary987654321";
 // El backend encadena cuatro APIs remotas (STT, embeddings, el modelo y el TTS).
 // Medido sobre la Pi: entre 5 y 11 s lo habitual, pero con cola larga —Gemini
@@ -32,6 +30,64 @@ constexpr uint32_t NETWORK_LOCK_WAIT_MS = 8000;
 uint8_t* requestBuffer = NULL;
 size_t requestCapacity = 0;
 uint8_t playbackRetries = 0;
+
+// La respuesta ya no pasa por LittleFS. Escribirla a flash congelaba la
+// animación de la cara mientras bajaba: cada escritura deshabilita la caché de
+// flash en los DOS núcleos, y el código de la cara vive en flash. Reproducir
+// desde PSRAM saca la flash del camino, tanto al bajar como al reproducir.
+//
+// Las respuestas medidas van de 20 a 155 KB; 256 KB dejan aire de sobra y en
+// PSRAM no compiten con nada.
+constexpr size_t RESPONSE_CAPACITY = 256 * 1024;
+uint8_t* responseBuffer = NULL;
+size_t responseCapacity = 0;
+size_t responseSize = 0;
+
+// Destino en memoria para HTTPClient::writeToStream, que es quien sabe deshacer
+// el chunked. Descarta lo que no entra en vez de escribir fuera del buffer, y
+// deja constancia para que un desborde no pase por un audio cortado a secas.
+class ResponseSink : public Stream {
+ public:
+  ResponseSink(uint8_t* destino, size_t capacidad)
+      : destino_(destino), capacidad_(capacidad) {}
+
+  size_t write(uint8_t byte) override { return write(&byte, 1); }
+
+  size_t write(const uint8_t* datos, size_t largo) override {
+    recibidos_ += largo;
+    const size_t entra = guardados_ + largo <= capacidad_ ? largo : capacidad_ - guardados_;
+    if (entra > 0) {
+      memcpy(destino_ + guardados_, datos, entra);
+      guardados_ += entra;
+    }
+    return largo;  // se le miente al emisor: cortar aca dejaria el socket a medias
+  }
+
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+
+  size_t guardados() const { return guardados_; }
+  size_t recibidos() const { return recibidos_; }
+  bool desbordo() const { return recibidos_ > guardados_; }
+
+ private:
+  uint8_t* destino_;
+  size_t capacidad_;
+  size_t guardados_ = 0;
+  size_t recibidos_ = 0;
+};
+
+bool ensureResponseBuffer(size_t needed) {
+  if (responseBuffer != NULL && responseCapacity >= needed) return true;
+  if (responseBuffer != NULL) free(responseBuffer);
+
+  responseBuffer = static_cast<uint8_t*>(ps_malloc(needed));
+  responseCapacity = responseBuffer != NULL ? needed : 0;
+
+  if (responseBuffer == NULL) Serial.println("❌ Sin memoria para la respuesta de audio.");
+  return responseBuffer != NULL;
+}
 
 bool ensureRequestBuffer(size_t needed) {
   if (requestBuffer != NULL && requestCapacity >= needed) return true;
@@ -77,10 +133,10 @@ size_t buildMultipartBody(size_t recordedPcmBytes) {
 // Un MP3 de edge-tts empieza en un frame sync (0xFF 0xFB/0xF3) o en un tag ID3.
 // Si lo que quedó en flash arranca con otra cosa, el decodificador aborta sin
 // emitir nada y este volcado dice exactamente con qué.
-void dumpAt(File& saved, const char* label, size_t offset) {
+void dumpAt(const uint8_t* datos, const char* label, size_t offset, size_t largo) {
   uint8_t bytes[16] = {0};
-  saved.seek(offset);
-  size_t read = saved.read(bytes, sizeof(bytes));
+  size_t read = offset < largo ? min(sizeof(bytes), largo - offset) : 0;
+  if (read) memcpy(bytes, datos + offset, read);
 
   String hex;
   size_t zeros = 0;
@@ -97,7 +153,7 @@ void dumpAt(File& saved, const char* label, size_t offset) {
 // Recorre el MP3 frame por frame. Mirar tres muestras sueltas no alcanza para
 // saber si el archivo esta intacto: esto camina la cadena entera y dice hasta
 // donde llega, que es exactamente lo que hace el decodificador antes de rendirse.
-void walkMp3Frames(File& saved, size_t fileSize) {
+void walkMp3Frames(const uint8_t* datos, size_t fileSize) {
   static const uint16_t BITRATE_MPEG1[16] =
     {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0};
   static const uint16_t BITRATE_MPEG2[16] =
@@ -113,9 +169,7 @@ void walkMp3Frames(File& saved, size_t fileSize) {
   uint16_t firstBitrate = 0;
 
   while (offset + 4 <= fileSize) {
-    uint8_t header[4];
-    saved.seek(offset);
-    if (saved.read(header, 4) != 4) break;
+    const uint8_t* header = datos + offset;
 
     if (header[0] != 0xFF || (header[1] & 0xE0) != 0xE0) break;
 
@@ -160,23 +214,22 @@ void walkMp3Frames(File& saved, size_t fileSize) {
   }
 }
 
-void inspectSavedResponse(File& saved, size_t fileSize) {
+void inspectSavedResponse(const uint8_t* datos, size_t fileSize) {
   Serial.printf("⬇️ %u bytes | heap libre %u | mayor bloque %u\n",
                 (unsigned)fileSize, (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
 
-  dumpAt(saved, "inicio", 0);
-  if (fileSize > 64) dumpAt(saved, "medio", fileSize / 2);
-  if (fileSize > 32) dumpAt(saved, "final", fileSize - 16);
-  saved.seek(0);
+  dumpAt(datos, "inicio", 0, fileSize);
+  if (fileSize > 64) dumpAt(datos, "medio", fileSize / 2, fileSize);
+  if (fileSize > 32) dumpAt(datos, "final", fileSize - 16, fileSize);
 
-  walkMp3Frames(saved, fileSize);
-  saved.seek(0);
+  walkMp3Frames(datos, fileSize);
 }
 
 void startPlayback(size_t fileSize) {
+  responseSize = fileSize;
   setFaceMode(FACE_SPEAKING);
-  file = new AudioFileSourceLittleFS(RESPONSE_PATH);
+  file = new AudioFileSourcePROGMEM(responseBuffer, fileSize);
   bool started = mp3->begin(file, out);
   playbackStartedMs = millis();
   playbackRetries = 0;
@@ -196,11 +249,16 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   }
 
   setFaceMode(FACE_WAITING);
+  // El decodificador ahora lo alimenta su propia tarea en prioridad 8: pararlo y
+  // liberar la fuente desde aca sin el candado seria arrancarle el archivo de las
+  // manos a mitad de una lectura.
+  audioLock(1000);
   if (mp3->isRunning()) mp3->stop();
   if (file) {
     delete file;
     file = NULL;
   }
+  audioUnlock();
 
   size_t bodyLength = buildMultipartBody(recordedPcmBytes);
   if (bodyLength == 0) {
@@ -208,6 +266,7 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     return;
   }
 
+  const uint32_t antesLockMs = millis();
   if (!backendLock(NETWORK_LOCK_WAIT_MS)) {
     Serial.println("❌ La red quedó ocupada demasiado tiempo.");
     setFaceMode(FACE_IDLE);
@@ -234,7 +293,9 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   const char* collected[] = {"X-Action"};
   http.collectHeaders(collected, 1);
 
+  const uint32_t antesPedidoMs = millis();
   int status = http.sendRequest("POST", requestBuffer, bodyLength);
+  const uint32_t cabeceraMs = millis();
   if (status != HTTP_CODE_OK) {
     Serial.printf("❌ El backend respondió %d.\n", status);
     http.end();
@@ -243,19 +304,17 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     return;
   }
 
-  File responseFile = LittleFS.open(RESPONSE_PATH, "w");
-  if (!responseFile) {
-    Serial.println("❌ No pude abrir /response.mp3 para escribir.");
+  if (!ensureResponseBuffer(RESPONSE_CAPACITY)) {
     http.end();
     backendUnlock();
     setFaceMode(FACE_IDLE);
     return;
   }
 
-  // writeToStream decodifica el chunked si lo hubiera.
-  int written = http.writeToStream(&responseFile);
-  responseFile.flush();
-  responseFile.close();
+  // writeToStream decodifica el chunked si lo hubiera; el destino es memoria.
+  ResponseSink sink(responseBuffer, RESPONSE_CAPACITY);
+  int written = http.writeToStream(&sink);
+  const uint32_t descargaMs = millis();
 
   String action = http.header("X-Action");
   http.end();
@@ -266,25 +325,32 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     setFaceMode(FACE_IDLE);
     return;
   }
-
-  // El tamaño hay que leerlo con el archivo ya cerrado: en modo escritura,
-  // File::size() devuelve el que tenía al abrirlo, o sea cero.
-  File savedResponse = LittleFS.open(RESPONSE_PATH, "r");
-  size_t fileSize = savedResponse ? savedResponse.size() : 0;
-  if (savedResponse) {
-    inspectSavedResponse(savedResponse, fileSize);
-    savedResponse.close();
+  if (sink.desbordo()) {
+    Serial.printf("⚠️ La respuesta no entró en el buffer (%u bytes de %u); se corta.\n",
+                  (unsigned)sink.recibidos(), (unsigned)RESPONSE_CAPACITY);
   }
 
+  const size_t fileSize = sink.guardados();
   if (fileSize == 0) {
-    Serial.println("❌ El MP3 quedó vacío en flash.");
+    Serial.println("❌ La respuesta llegó vacía.");
     backendUnlock();
     setFaceMode(FACE_IDLE);
     return;
   }
+  inspectSavedResponse(responseBuffer, fileSize);
 
+  const uint32_t inspeccionMs = millis();
   if (action.length() > 0) executeDeviceCommand(action);
+  audioLock(1000);
   startPlayback(fileSize);
+  audioUnlock();
+  Serial.printf(
+      "[etapas] espera_lock=%lums  pedido=%lums  descarga=%lums  revision=%lums  arranque=%lums\n",
+      (unsigned long)(antesPedidoMs - antesLockMs),
+      (unsigned long)(cabeceraMs - antesPedidoMs),
+      (unsigned long)(descargaMs - cabeceraMs),
+      (unsigned long)(inspeccionMs - descargaMs),
+      (unsigned long)(millis() - inspeccionMs));
 
   // Cerrar el socket va despues de que la reproduccion abrio su archivo. Al
   // reves, el descriptor recien abierto quedaba invalido: getPos() devolvia -1
@@ -312,7 +378,7 @@ bool retryPlayback() {
     file = NULL;
   }
 
-  file = new AudioFileSourceLittleFS(RESPONSE_PATH);
+  file = new AudioFileSourcePROGMEM(responseBuffer, responseSize);
   if (!mp3->begin(file, out)) {
     Serial.println("   el reintento tampoco pudo arrancar");
     return false;

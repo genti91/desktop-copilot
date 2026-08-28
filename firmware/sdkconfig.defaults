@@ -91,3 +91,16 @@ CONFIG_ML_MAX_PEERS=16
 # La configuracion del dispositivo ya la sirve el portal cautivo de WiFiManager.
 CONFIG_ML_ENABLE_CONFIG_HTTPD=n
 CONFIG_ML_ENABLE_CELLULAR=n
+
+# --- Wake word ("Jarvis") -------------------------------------------------
+# esp-sr ya venia como componente gestionado con el bundle de Arduino sobre IDF;
+# aca solo se elige el modelo. wn9_jarvis_tts es el unico que se activa: cada
+# modelo extra ocupa lugar en la particion y RAM en tiempo de ejecucion.
+CONFIG_SR_WN_WN9_JARVIS_TTS=y
+# Los modelos viven en la particion "model" de partitions.csv, no en un SPIFFS
+# montado ni en SD.
+CONFIG_MODEL_IN_FLASH=y
+# MultiNet es reconocimiento de comandos completo despues de la palabra de
+# activacion. No hace falta: lo que se diga despues va al backend como hasta
+# ahora, y el modelo pesa mucho mas que WakeNet.
+CONFIG_USE_MULTINET=n

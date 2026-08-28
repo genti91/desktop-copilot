@@ -12,6 +12,8 @@
 #include "settings.h"
 #include "tailnet.h"
 #include "version.h"
+#include "voice.h"
+#include "wakeword.h"
 
 // server_url y device_token viven en backend.cpp, la auth key en tailnet.cpp.
 bool shouldSaveConfig = false;
@@ -156,6 +158,7 @@ void setup() {
   checkForFirmwareUpdate();
 
   initAudio();
+  startAudioTask();
   initDeviceSettings();
 
   xTaskCreatePinnedToCore(
@@ -172,6 +175,13 @@ void setup() {
   // (colores, encendidos e imagen de reposo).
   refreshDeviceSettings(true);
 
+  // La escucha continua NO arranca aca. Un intento anterior murio dentro del
+  // arranque del AFE y se llevo puesto el USB con el: la placa quedo en ciclo de
+  // reinicio, sin consola para leer y sin puerto para reflashear. Arrancarla
+  // desde loop(), unos segundos despues, garantiza que el log del arranque ya
+  // salio y que el puerto quedo establecido antes de tocar la parte riesgosa.
+  // Ver WAKEWORD_ARRANQUE_MS en loop().
+
   // El sondeo y el OTA pasan a su propia tarea: en loop() bloqueaban la
   // lectura del sensor tactil y la reproduccion del audio.
   startMaintenanceTask();
@@ -180,10 +190,32 @@ void setup() {
   Serial.println("\n✅ SISTEMA LISTO. Mantén presionado el sensor Touch para hablar.");
 }
 
+// Cuanto espera loop() antes de levantar la escucha continua. Lo suficiente para
+// que el arranque haya terminado de imprimirse y el USB este firme.
+constexpr uint32_t WAKEWORD_ARRANQUE_MS = 8000;
+
 void loop() {
-  updateAudioPlayback();
+
+  static bool wakeWordIntentada = false;
+  if (!wakeWordIntentada && millis() > WAKEWORD_ARRANQUE_MS) {
+    wakeWordIntentada = true;
+    startWakeWord();
+  }
+
+  // La escucha continua deja la grabacion lista en pcm_buffer y avisa por aca.
+  // El envio va en loop() y no en su tarea: bloquea varios segundos y comparte
+  // el candado de red con el mantenimiento.
+  const size_t porWakeWord = wakeWordCapturedBytes();
+  if (porWakeWord > 0) {
+    normalizeRecording(porWakeWord);
+    sendAudioAndPlayResponse(porWakeWord);
+    wakeWordResume();
+  }
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
+    // El reloj arranca en el primer HIGH, antes del antirrebote: es el instante
+    // en que el usuario tocó, que es contra el que hay que medir todo lo demás.
+    interactionStartedMs = millis();
     delay(50);
     if (digitalRead(TOUCH_PIN) == HIGH) {
       wakeDeviceOutputs();
