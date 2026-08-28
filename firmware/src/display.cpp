@@ -13,6 +13,10 @@ volatile bool facePaused = false;
 volatile bool faceParked = false;
 volatile bool idleImageReady = false;
 volatile bool idleImageDrawn = false;
+uint32_t ultimoCuadroMs = 0;
+uint32_t peorHuecoMs = 0;
+uint32_t cuadros = 0;
+uint32_t ventanaMs = 0;
 
 void drawEye(int centerX, int centerY, int width, int height) {
   if (height < 4) height = 4;
@@ -238,6 +242,26 @@ void faceAnimationTask(void* parameter) {
       continue;
     }
     faceParked = false;
+
+    // La cara es la única señal de que el aparato registró el toque. Si la tarea
+    // se queda sin procesador —vive en el núcleo 0, junto al Wi-Fi y a
+    // MicroLink— el usuario ve la reacción tarde aunque el firmware haya
+    // reaccionado a tiempo. Esto mide el peor hueco entre dos cuadros.
+    const uint32_t ahora = millis();
+    if (ultimoCuadroMs != 0) {
+      const uint32_t hueco = ahora - ultimoCuadroMs;
+      if (hueco > peorHuecoMs) peorHuecoMs = hueco;
+    }
+    ultimoCuadroMs = ahora;
+    cuadros++;
+    if (ahora - ventanaMs >= 5000) {
+      Serial.printf("[cara] %lu cuadros en 5 s  peor_hueco=%lums\n",
+                    (unsigned long)cuadros, (unsigned long)peorHuecoMs);
+      cuadros = 0;
+      peorHuecoMs = 0;
+      ventanaMs = ahora;
+    }
+
     updateFace();
     vTaskDelay(pdMS_TO_TICKS(FACE_TASK_DELAY_MS));
   }

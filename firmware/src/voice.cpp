@@ -208,6 +208,7 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     return;
   }
 
+  const uint32_t antesLockMs = millis();
   if (!backendLock(NETWORK_LOCK_WAIT_MS)) {
     Serial.println("❌ La red quedó ocupada demasiado tiempo.");
     setFaceMode(FACE_IDLE);
@@ -234,7 +235,9 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   const char* collected[] = {"X-Action"};
   http.collectHeaders(collected, 1);
 
+  const uint32_t antesPedidoMs = millis();
   int status = http.sendRequest("POST", requestBuffer, bodyLength);
+  const uint32_t cabeceraMs = millis();
   if (status != HTTP_CODE_OK) {
     Serial.printf("❌ El backend respondió %d.\n", status);
     http.end();
@@ -254,6 +257,7 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
 
   // writeToStream decodifica el chunked si lo hubiera.
   int written = http.writeToStream(&responseFile);
+  const uint32_t descargaMs = millis();
   responseFile.flush();
   responseFile.close();
 
@@ -283,8 +287,16 @@ void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     return;
   }
 
+  const uint32_t inspeccionMs = millis();
   if (action.length() > 0) executeDeviceCommand(action);
   startPlayback(fileSize);
+  Serial.printf(
+      "[etapas] espera_lock=%lums  pedido=%lums  descarga=%lums  revision=%lums  arranque=%lums\n",
+      (unsigned long)(antesPedidoMs - antesLockMs),
+      (unsigned long)(cabeceraMs - antesPedidoMs),
+      (unsigned long)(descargaMs - cabeceraMs),
+      (unsigned long)(inspeccionMs - descargaMs),
+      (unsigned long)(millis() - inspeccionMs));
 
   // Cerrar el socket va despues de que la reproduccion abrio su archivo. Al
   // reves, el descriptor recien abierto quedaba invalido: getPos() devolvia -1

@@ -10,6 +10,7 @@ AudioGeneratorMP3* mp3 = NULL;
 AudioFileSourceLittleFS* file = NULL;
 AudioOutputI2S* out = NULL;
 uint32_t playbackStartedMs = 0;
+uint32_t interactionStartedMs = 0;
 
 namespace {
 
@@ -51,6 +52,17 @@ void initMicrophone() {
     },
   };
 
+  // El micrófono entrega poco nivel: medido a la distancia normal de uso, la voz
+  // pica entre 560 y 977 sobre 32767, menos del 3% de la escala. Se probaron dos
+  // arreglos del lado del hardware y ninguno movió la aguja:
+  //
+  //  - amplify_num, el multiplicador del PDM, no existe en el S3 (define
+  //    SOC_I2S_SUPPORTS_PDM_RX pero no ..._HP_FILTER, así que el campo ni se
+  //    compila).
+  //  - I2S_PDM_DSR_16S, para sacar al micrófono de un posible modo de bajo
+  //    consumo por reloj lento, dejó el pico igual: 747, 686, 672.
+  //
+  // Así que el nivel se corrige por software, en cleanAndAmplifyAudio.
   if (!micStep("init_pdm_rx_mode", i2s_channel_init_pdm_rx_mode(micChannel, &pdmConfig)) ||
       !micStep("channel_enable", i2s_channel_enable(micChannel))) {
     i2s_del_channel(micChannel);
@@ -72,6 +84,13 @@ void probeMicrophone() {
                 esp_err_to_name(result), (unsigned)bytesRead);
 }
 
+// Pico de la grabación antes de amplificar, y ganancia aplicada. Un pico bajo
+// con la ganancia pegada al tope significa que al micrófono le llegó poca señal,
+// que es lo que después se escucha como "no me entiende".
+int16_t lastPeak = 0;
+float lastGain = 1.0;
+bool firstLoopReported = false;
+
 void cleanAndAmplifyAudio(uint8_t* buffer, size_t totalBytes) {
   int16_t* samples = (int16_t*)buffer;
   size_t sampleCount = totalBytes / 2;
@@ -88,9 +107,16 @@ void cleanAndAmplifyAudio(uint8_t* buffer, size_t totalBytes) {
     if (absoluteValue > maxValue) maxValue = absoluteValue;
   }
 
+  // El tope de 6x se quedaba corto por mucho: con un pico de 800 hacían falta
+  // 32x para llegar al objetivo, así que la normalización nunca normalizaba y a
+  // Whisper le llegaba una grabación al 15% de la escala. Amplificar no mejora
+  // la relación señal/ruido —eso lo arregla el reloj del PDM, más arriba— pero
+  // sí pone el nivel donde el reconocedor lo espera.
   float gain = 26000.0 / maxValue;
-  if (gain > 6.0) gain = 6.0;
+  if (gain > 30.0) gain = 30.0;
   if (gain < 1.0) gain = 1.0;
+  lastPeak = maxValue;
+  lastGain = gain;
 
   for (size_t index = 0; index < sampleCount; index++) {
     int32_t value = (int32_t)(samples[index] * gain);
@@ -133,6 +159,7 @@ void initAudio() {
 void recordWhileTouched() {
   if (!pcm_buffer) return;
 
+  const uint32_t entradaMs = millis();
   Serial.println("🎙️ Sensor Tocado: Grabando...");
   setFaceMode(FACE_RECORDING);
 
@@ -142,6 +169,7 @@ void recordWhileTouched() {
                          ? i2s_channel_read(micChannel, pcm_buffer, 1024, &bytesRead,
                                             MIC_READ_TIMEOUT_MS)
                          : ESP_ERR_INVALID_STATE;
+  const uint32_t primeraMuestraMs = millis();
   if (primed != ESP_OK || bytesRead == 0) {
     Serial.printf("❌ El microfono no entrega muestras (%s).\n", esp_err_to_name(primed));
     setFaceMode(FACE_IDLE);
@@ -156,8 +184,16 @@ void recordWhileTouched() {
   }
 
   Serial.printf("🛑 TTP223 Liberado: Grabación finalizada (%d bytes).\n", totalBytes);
+  const uint32_t finGrabacionMs = millis();
   if (totalBytes > 0) {
     cleanAndAmplifyAudio(pcm_buffer, totalBytes);
+    Serial.printf(
+        "[etapas] toque->grabando=%lums  primera_muestra=%lums  grabacion=%lums (%.1fs de audio)"
+        "  pico=%d  ganancia=%.1fx\n",
+        (unsigned long)(entradaMs - interactionStartedMs),
+        (unsigned long)(primeraMuestraMs - entradaMs),
+        (unsigned long)(finGrabacionMs - entradaMs),
+        totalBytes / 32000.0f, (int)lastPeak, lastGain);
     sendAudioAndPlayResponse(totalBytes);
   } else {
     setFaceMode(FACE_IDLE);
@@ -165,7 +201,20 @@ void recordWhileTouched() {
 }
 
 void updateAudioPlayback() {
-  if (!mp3->isRunning()) return;
+  if (!mp3->isRunning()) {
+    firstLoopReported = false;
+    return;
+  }
+
+  // Cuánto tarda loop() en volver a alimentar al decodificador después de que
+  // arrancó la reproducción. Si esto es grande, la cara de hablar ya cambió pero
+  // todavía no salió audio, y el desfasaje es CPU robada a loopTask.
+  if (!firstLoopReported) {
+    firstLoopReported = true;
+    Serial.printf("[etapas] arranque->primer_decode=%lums  desde_el_toque=%lums\n",
+                  (unsigned long)(millis() - playbackStartedMs),
+                  (unsigned long)(millis() - interactionStartedMs));
+  }
 
   if (!mp3->loop()) {
     uint32_t elapsed = millis() - playbackStartedMs;

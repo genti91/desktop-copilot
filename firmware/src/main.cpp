@@ -184,6 +184,9 @@ void loop() {
   updateAudioPlayback();
 
   if (digitalRead(TOUCH_PIN) == HIGH) {
+    // El reloj arranca en el primer HIGH, antes del antirrebote: es el instante
+    // en que el usuario tocó, que es contra el que hay que medir todo lo demás.
+    interactionStartedMs = millis();
     delay(50);
     if (digitalRead(TOUCH_PIN) == HIGH) {
       wakeDeviceOutputs();

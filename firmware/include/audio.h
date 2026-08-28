@@ -12,5 +12,8 @@ extern AudioOutputI2S* out;
 extern uint32_t playbackStartedMs;
 
 void initAudio();
+// Momento en que loop() confirmo el toque. Sirve para medir cuanto tarda
+// cada etapa de la interaccion desde el punto de vista del usuario.
+extern uint32_t interactionStartedMs;
 void recordWhileTouched();
 void updateAudioPlayback();
