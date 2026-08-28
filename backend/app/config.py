@@ -59,14 +59,15 @@ FALLBACK_GENAI_CONFIG = types.GenerateContentConfig(
     temperature=0.3,
 )
 
-# Presupuesto de reintentos del SDK. Con el default (5 intentos, hasta 60 s de
-# espera) un 503 se lleva unos 20 segundos antes de rendirse, y el dispositivo
-# se queda mudo todo ese rato. Así falla en ~2 s y queda tiempo para el respaldo.
+# Sin reintentos a propósito. El timeout del SDK es POR INTENTO, así que cada
+# reintento multiplica la espera: medido acá, un modelo saturado tardaba 19 s en
+# rendirse y una vez llegó a 41 s de ReadTimeout con dos intentos de 20 s. El
+# reintento nuestro es el modelo de respaldo, que además tiene sentido: al que
+# está sobrecargado no sirve insistirle.
+#
+# 12 s de techo contra un p50 de ~2 s al primer token y ~5 s de respuesta
+# completa: deja lugar para una lenta pero corta el plantón.
 GENAI_HTTP_OPTIONS = types.HttpOptions(
-    timeout=20_000,  # milisegundos
-    retry_options=types.HttpRetryOptions(
-        attempts=2,
-        initial_delay=0.5,
-        max_delay=2.0,
-    ),
+    timeout=12_000,  # milisegundos, por intento
+    retry_options=types.HttpRetryOptions(attempts=1),
 )

@@ -35,7 +35,11 @@ def test_los_dos_modelos_comparten_los_limites_de_la_respuesta():
     assert FALLBACK_GENAI_CONFIG.temperature == FAST_GENAI_CONFIG.temperature
 
 
-def test_el_presupuesto_de_reintentos_esta_acotado():
-    reintentos = GENAI_HTTP_OPTIONS.retry_options
-    assert reintentos.attempts <= 2, "más intentos y no queda tiempo para el respaldo"
-    assert reintentos.max_delay <= 2.0
+def test_no_hay_reintentos_contra_el_mismo_modelo():
+    """El timeout del SDK es por intento: cada reintento multiplica la espera.
+
+    Medido, un modelo saturado tardaba 19 s en rendirse y con dos intentos de
+    20 s llegó a 41 s de ReadTimeout. El reintento es el modelo de respaldo.
+    """
+    assert GENAI_HTTP_OPTIONS.retry_options.attempts <= 1
+    assert GENAI_HTTP_OPTIONS.timeout <= 15_000, "milisegundos, y se paga una vez por modelo"
