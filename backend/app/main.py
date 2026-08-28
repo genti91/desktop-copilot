@@ -6,7 +6,6 @@ from datetime import datetime
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from google.genai import types
-from google.genai.errors import ServerError
 
 from .auth import install_auth
 from .config import APP_TITLE, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
@@ -126,6 +125,10 @@ async def voice_assistant(
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
     gemini_contents = [system_instruction, *sessions[session_id], current_user_message]
 
+    # Cualquier error pasa al siguiente modelo, sin distinguir el tipo: un 503 y
+    # un timeout se ven distinto pero significan lo mismo acá —de este modelo no
+    # va a salir la respuesta— y separarlos ya causó que un timeout del primario
+    # se saltara el respaldo. Si fallan todos queda la disculpa hablada.
     response_text = "Perdón, tuve un problema procesando eso."
     for modelo, configuracion in voice_models():
         try:
@@ -136,13 +139,8 @@ async def voice_assistant(
             )
             response_text = (result.text or "").replace("**", "").replace("*", "").replace("#", "").strip()
             break
-        except ServerError as error:
-            # 503 "high demand": el modelo está saturado. Insistirle no sirve,
-            # así que se pasa al siguiente de la lista.
-            print(f"[Gemini] {modelo} no disponible ({error.code}); paso al siguiente.")
         except Exception as error:
-            print(f"[Gemini Error] {modelo}: {error}")
-            break
+            print(f"[Gemini] {modelo} no contestó ({type(error).__name__}); paso al siguiente.")
 
     sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
     sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
