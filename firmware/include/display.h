@@ -15,7 +15,11 @@
 #include "device_config.h"
 
 constexpr BaseType_t FACE_TASK_CORE = 0;
-constexpr uint32_t FACE_TASK_DELAY_MS = 15;
+// Medido, la cara daba 19 cuadros por segundo: 55 ms por cuadro, de los cuales
+// unos 23 eran el volcado del sprite por SPI a 40 MHz y 15 esta espera. A 80 MHz
+// el volcado baja a la mitad, y con 8 ms de espera el cuadro queda cerca de 30 ms.
+// El techo despues de esto es dibujar el sprite en PSRAM, no el bus.
+constexpr uint32_t FACE_TASK_DELAY_MS = 8;
 constexpr size_t IDLE_IMAGE_BYTES = static_cast<size_t>(SCREEN_W) * SCREEN_H * 2;
 
 extern TFT_eSPI tft;

@@ -3,5 +3,13 @@ nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x330000,
 app1,     app,  ota_1,   0x340000,0x330000,
-spiffs,   data, spiffs,  0x670000,0x180000,
+# LittleFS baja de 1.5 MB a 1 MB para hacerle lugar al modelo de la wake word.
+# Adentro solo viven la imagen de reposo (115 KB) y el MP3 de la respuesta
+# (~100 KB), asi que sobra. Lo que habia se pierde al cambiar el tamano, pero la
+# imagen la vuelve a bajar del backend sola.
+spiffs,   data, spiffs,  0x670000,0x100000,
+# Los modelos de esp-sr. El nombre tiene que ser exactamente "model": la macro
+# de su CMakeLists busca la particion por ese nombre para generar srmodels.bin,
+# y si no la encuentra no empaqueta nada. wn9_jarvis_tts son 289 KB.
+model,    data, spiffs,  0x770000,0x80000,
 coredump, data, coredump,0x7F0000,0x10000,

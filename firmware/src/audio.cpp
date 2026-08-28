@@ -4,10 +4,11 @@
 #include "device_config.h"
 #include "display.h"
 #include "voice.h"
+#include "wakeword.h"
 
 uint8_t* pcm_buffer = NULL;
 AudioGeneratorMP3* mp3 = NULL;
-AudioFileSourceLittleFS* file = NULL;
+AudioFileSource* file = NULL;
 AudioOutputI2S* out = NULL;
 uint32_t playbackStartedMs = 0;
 uint32_t interactionStartedMs = 0;
@@ -90,6 +91,8 @@ void probeMicrophone() {
 int16_t lastPeak = 0;
 float lastGain = 1.0;
 bool firstLoopReported = false;
+uint32_t ultimoDecodeMs = 0;
+uint32_t peorHuecoDecodeMs = 0;
 
 void cleanAndAmplifyAudio(uint8_t* buffer, size_t totalBytes) {
   int16_t* samples = (int16_t*)buffer;
@@ -110,8 +113,8 @@ void cleanAndAmplifyAudio(uint8_t* buffer, size_t totalBytes) {
   // El tope de 6x se quedaba corto por mucho: con un pico de 800 hacían falta
   // 32x para llegar al objetivo, así que la normalización nunca normalizaba y a
   // Whisper le llegaba una grabación al 15% de la escala. Amplificar no mejora
-  // la relación señal/ruido —eso lo arregla el reloj del PDM, más arriba— pero
-  // sí pone el nivel donde el reconocedor lo espera.
+  // la relación señal/ruido —el ruido sube con la señal— pero sí pone el nivel
+  // donde el reconocedor lo espera, y con eso alcanzó.
   float gain = 26000.0 / maxValue;
   if (gain > 30.0) gain = 30.0;
   if (gain < 1.0) gain = 1.0;
@@ -125,6 +128,52 @@ void cleanAndAmplifyAudio(uint8_t* buffer, size_t totalBytes) {
     samples[index] = (int16_t)value;
   }
 }
+}
+
+SemaphoreHandle_t audioMutex = NULL;
+
+bool audioLock(uint32_t timeoutMs) {
+  if (audioMutex == NULL) return true;  // todavía no arrancó la tarea
+  return xSemaphoreTake(audioMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+
+void audioUnlock() {
+  if (audioMutex != NULL) xSemaphoreGive(audioMutex);
+}
+
+namespace {
+
+// Prioridad 8: por encima de ml_wg_mgr, que corre en 7 sobre este mismo núcleo y
+// es quien dejaba sin comer al decodificador. Y con vTaskDelay en cada vuelta,
+// que es lo que hace que sea seguro estar tan arriba: cede el procesador siempre,
+// asi que no puede ahogar al tunel ni a nada mas. Subirle la prioridad a loop()
+// en vez de esto no servia: la escritura de I2S es no bloqueante, asi que con el
+// buffer lleno loop() giraria en vacio reteniendo el nucleo.
+void audioTask(void* parametro) {
+  (void)parametro;
+  for (;;) {
+    updateAudioPlayback();
+    vTaskDelay(1);  // 1 ms; un cuadro de MP3 son 48 ms de audio, sobra de lejos
+  }
+}
+
+}  // namespace
+
+void startAudioTask() {
+  if (audioMutex == NULL) audioMutex = xSemaphoreCreateMutex();
+  xTaskCreatePinnedToCore(audioTask, "audio", 4096, NULL, 8, NULL, 1);
+}
+
+bool micRead(void* destino, size_t bytes, size_t* leidos, uint32_t timeoutMs) {
+  if (micChannel == NULL) return false;
+  return i2s_channel_read(micChannel, destino, bytes, leidos, timeoutMs) == ESP_OK;
+}
+
+void normalizeRecording(size_t totalBytes) {
+  if (pcm_buffer == NULL || totalBytes == 0) return;
+  cleanAndAmplifyAudio(pcm_buffer, totalBytes);
+  Serial.printf("[etapas] pico=%d  ganancia=%.1fx  (%.1fs de audio)\n",
+                (int)lastPeak, lastGain, totalBytes / 32000.0f);
 }
 
 void initAudio() {
@@ -160,6 +209,8 @@ void recordWhileTouched() {
   if (!pcm_buffer) return;
 
   const uint32_t entradaMs = millis();
+  // La escucha continua tiene el micrófono ocupado; hay que pedírselo prestado.
+  pauseWakeWord();
   Serial.println("🎙️ Sensor Tocado: Grabando...");
   setFaceMode(FACE_RECORDING);
 
@@ -173,6 +224,7 @@ void recordWhileTouched() {
   if (primed != ESP_OK || bytesRead == 0) {
     Serial.printf("❌ El microfono no entrega muestras (%s).\n", esp_err_to_name(primed));
     setFaceMode(FACE_IDLE);
+    resumeWakeWord();
     return;
   }
 
@@ -198,6 +250,7 @@ void recordWhileTouched() {
   } else {
     setFaceMode(FACE_IDLE);
   }
+  resumeWakeWord();
 }
 
 void updateAudioPlayback() {
@@ -206,15 +259,35 @@ void updateAudioPlayback() {
     return;
   }
 
+  // Sin espera larga: si loop() esta manipulando el decodificador, esta vuelta se
+  // saltea y se reintenta en 1 ms. Bloquear aca seria bloquear la prioridad 8.
+  if (!audioLock(2)) return;
+  if (!mp3->isRunning()) {
+    audioUnlock();
+    return;
+  }
+
   // Cuánto tarda loop() en volver a alimentar al decodificador después de que
   // arrancó la reproducción. Si esto es grande, la cara de hablar ya cambió pero
   // todavía no salió audio, y el desfasaje es CPU robada a loopTask.
   if (!firstLoopReported) {
     firstLoopReported = true;
+    ultimoDecodeMs = millis();
+    peorHuecoDecodeMs = 0;
     Serial.printf("[etapas] arranque->primer_decode=%lums  desde_el_toque=%lums\n",
                   (unsigned long)(millis() - playbackStartedMs),
                   (unsigned long)(millis() - interactionStartedMs));
   }
+
+  // El DMA de salida tiene 256 ms de colchón. Si loop() tarda más que eso en
+  // volver a alimentar al decodificador, el buffer se vacía —y como arranca con
+  // auto_clear en false, repite lo viejo en vez de callarse: eso es lo que se
+  // escucha como un trabón o una palabra dicha dos veces. Este número dice si
+  // pasó y por cuánto, en vez de dejarlo a la percepción.
+  const uint32_t ahoraDecode = millis();
+  const uint32_t huecoDecode = ahoraDecode - ultimoDecodeMs;
+  if (huecoDecode > peorHuecoDecodeMs) peorHuecoDecodeMs = huecoDecode;
+  ultimoDecodeMs = ahoraDecode;
 
   if (!mp3->loop()) {
     uint32_t elapsed = millis() - playbackStartedMs;
@@ -226,6 +299,7 @@ void updateAudioPlayback() {
                     (unsigned long)elapsed, (unsigned long)position);
       if (retryPlayback()) {
         Serial.println("   reintentando con el mismo archivo...");
+        audioUnlock();
         return;
       }
     }
@@ -235,8 +309,10 @@ void updateAudioPlayback() {
       delete file;
       file = NULL;
     }
-    Serial.printf("✅ Reproducción finalizada tras %lu ms (leyó %lu bytes).\n",
-                  (unsigned long)elapsed, (unsigned long)position);
+    Serial.printf("✅ Reproducción finalizada tras %lu ms (leyó %lu bytes).  peor_hueco=%lums\n",
+                  (unsigned long)elapsed, (unsigned long)position,
+                  (unsigned long)peorHuecoDecodeMs);
     setFaceMode(FACE_IDLE);
   }
+  audioUnlock();
 }
