@@ -26,6 +26,18 @@
 // Fix IDF problems with ESP32S3
 // Note illogical enumerations: FSPI_HOST=SPI2_HOST=1   HSPI_HOST=SPI3_HOST=2
 #if CONFIG_IDF_TARGET_ESP32S3
+  // PARCHE: la macro REG_SPI_BASE() del SDK cambio de semantica y ya no mapea el
+  // puerto 3 a SPI3; cae en la rama del else y devuelve 0x60000000, que es UART0.
+  //
+  //   Arduino 2.0.17: (((i)>=2) ? (DR_REG_SPI2_BASE + (i-2)*0x1000) : 0)
+  //   IDF 5.5:        (((i)==2) ? DR_REG_SPI2_BASE : (DR_REG_SPI0_BASE - i*0x1000))
+  //
+  // La definicion propia de la libreria (la de abajo) si es correcta para el S3,
+  // pero queda anulada por el #ifndef porque el SDK ya definio la macro. Con el
+  // #undef vuelve a ganar, y con ella todos los SPI_*_REG(SPI_PORT) que usa
+  // Processors/TFT_eSPI_ESP32_S3.c.
+  #undef REG_SPI_BASE
+
   // Fix ESP32C3 IDF bug for missing definition (FSPI only tested at the moment)
   #ifndef REG_SPI_BASE //                      HSPI                 FSPI/VSPI
     #define REG_SPI_BASE(i) (((i)>1) ? (DR_REG_SPI3_BASE) : (DR_REG_SPI2_BASE))
@@ -113,29 +125,10 @@ SPI3_HOST = 2
 
 // Processor specific code used by SPI bus transaction startWrite and endWrite functions
 #if !defined (ESP32_PARALLEL)
-  // PARCHE: en IDF 5.x la macro REG_SPI_BASE() del S3 cambio de semantica y ya
-  // no mapea el puerto 3 a SPI3: cae en la rama del else y devuelve 0x60000000,
-  // que es UART0. La direccion se calcula desde la base real del periferico.
-  //
-  //   Arduino 2.0.17: (((i)>=2) ? (DR_REG_SPI2_BASE + (i-2)*0x1000) : 0)
-  //   IDF 5.5:        (((i)==2) ? DR_REG_SPI2_BASE : (DR_REG_SPI0_BASE - i*0x1000))
-  #if defined (CONFIG_IDF_TARGET_ESP32S3) && defined (USE_HSPI_PORT)
-    #define _TFT_SPI_BASE DR_REG_SPI3_BASE
-  #elif defined (CONFIG_IDF_TARGET_ESP32S3)
-    #define _TFT_SPI_BASE DR_REG_SPI2_BASE
-  #endif
-
-  #ifdef _TFT_SPI_BASE
-    #define _spi_cmd       (volatile uint32_t*)(_TFT_SPI_BASE + 0x00)
-    #define _spi_user      (volatile uint32_t*)(_TFT_SPI_BASE + 0x10)
-    #define _spi_mosi_dlen (volatile uint32_t*)(_TFT_SPI_BASE + 0x1C)
-    #define _spi_w         (volatile uint32_t*)(_TFT_SPI_BASE + 0x98)
-  #else
-    #define _spi_cmd       (volatile uint32_t*)(SPI_CMD_REG(SPI_PORT))
-    #define _spi_user      (volatile uint32_t*)(SPI_USER_REG(SPI_PORT))
-    #define _spi_mosi_dlen (volatile uint32_t*)(SPI_MOSI_DLEN_REG(SPI_PORT))
-    #define _spi_w         (volatile uint32_t*)(SPI_W0_REG(SPI_PORT))
-  #endif
+  #define _spi_cmd       (volatile uint32_t*)(SPI_CMD_REG(SPI_PORT))
+  #define _spi_user      (volatile uint32_t*)(SPI_USER_REG(SPI_PORT))
+  #define _spi_mosi_dlen (volatile uint32_t*)(SPI_MOSI_DLEN_REG(SPI_PORT))
+  #define _spi_w         (volatile uint32_t*)(SPI_W0_REG(SPI_PORT))
 
   #if (TFT_SPI_MODE == SPI_MODE1) || (TFT_SPI_MODE == SPI_MODE2)
     #define SET_BUS_WRITE_MODE *_spi_user = SPI_USR_MOSI | SPI_CK_OUT_EDGE
