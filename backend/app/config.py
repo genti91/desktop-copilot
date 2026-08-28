@@ -42,3 +42,34 @@ FAST_GENAI_CONFIG = types.GenerateContentConfig(
     max_output_tokens=300,
     temperature=0.3,
 )
+
+# El modelo de la voz sale por variable de entorno para poder cambiarlo sin
+# tocar el código el día que alguno se ponga lento o desaparezca.
+VOICE_MODEL = os.getenv("VOICE_MODEL", "gemini-3.1-flash-lite")
+
+# Respaldo para cuando el primario contesta 503 "high demand", que medido acá
+# pasa en 1 de cada 6 llamadas. Es otro modelo y no un reintento contra el
+# mismo: si está saturado, insistirle no ayuda.
+VOICE_MODEL_FALLBACK = os.getenv("VOICE_MODEL_FALLBACK", "gemini-3.5-flash-lite")
+
+# El de respaldo va sin thinking_config: rechaza thinking_budget=0 con un
+# 400 INVALID_ARGUMENT. Igual no le hace falta, no es un modelo que razone.
+FALLBACK_GENAI_CONFIG = types.GenerateContentConfig(
+    max_output_tokens=300,
+    temperature=0.3,
+)
+
+# Sin reintentos a propósito. El timeout del SDK es POR INTENTO, así que cada
+# reintento multiplica la espera: medido acá, un modelo saturado tardaba 19 s en
+# rendirse y una vez llegó a 41 s de ReadTimeout con dos intentos de 20 s. El
+# reintento nuestro es el modelo de respaldo, que además tiene sentido: al que
+# está sobrecargado no sirve insistirle.
+#
+# El techo se paga una vez por modelo. Con 12 s se cortaban respuestas sanas
+# —el primario real dio ReadTimeout en el camino normal— y una respuesta de 15 s
+# es mejor que una disculpa a los 12. Con 18 s el peor caso son 36 s, que
+# requiere que los dos modelos se cuelguen; el caso típico son ~5 s.
+GENAI_HTTP_OPTIONS = types.HttpOptions(
+    timeout=18_000,  # milisegundos, por intento
+    retry_options=types.HttpRetryOptions(attempts=1),
+)
