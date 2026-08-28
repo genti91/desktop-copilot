@@ -42,3 +42,31 @@ FAST_GENAI_CONFIG = types.GenerateContentConfig(
     max_output_tokens=300,
     temperature=0.3,
 )
+
+# El modelo de la voz sale por variable de entorno para poder cambiarlo sin
+# tocar el código el día que alguno se ponga lento o desaparezca.
+VOICE_MODEL = os.getenv("VOICE_MODEL", "gemini-3.1-flash-lite")
+
+# Respaldo para cuando el primario contesta 503 "high demand", que medido acá
+# pasa en 1 de cada 6 llamadas. Es otro modelo y no un reintento contra el
+# mismo: si está saturado, insistirle no ayuda.
+VOICE_MODEL_FALLBACK = os.getenv("VOICE_MODEL_FALLBACK", "gemini-3.5-flash-lite")
+
+# El de respaldo va sin thinking_config: rechaza thinking_budget=0 con un
+# 400 INVALID_ARGUMENT. Igual no le hace falta, no es un modelo que razone.
+FALLBACK_GENAI_CONFIG = types.GenerateContentConfig(
+    max_output_tokens=300,
+    temperature=0.3,
+)
+
+# Presupuesto de reintentos del SDK. Con el default (5 intentos, hasta 60 s de
+# espera) un 503 se lleva unos 20 segundos antes de rendirse, y el dispositivo
+# se queda mudo todo ese rato. Así falla en ~2 s y queda tiempo para el respaldo.
+GENAI_HTTP_OPTIONS = types.HttpOptions(
+    timeout=20_000,  # milisegundos
+    retry_options=types.HttpRetryOptions(
+        attempts=2,
+        initial_delay=0.5,
+        max_delay=2.0,
+    ),
+)

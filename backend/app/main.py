@@ -6,11 +6,12 @@ from datetime import datetime
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from google.genai import types
+from google.genai.errors import ServerError
 
 from .auth import install_auth
-from .config import APP_TITLE, FAST_GENAI_CONFIG, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
+from .config import APP_TITLE, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
 from .device import router as device_router
-from .integrations import collection, generate_speech_bytes, gemini, groq
+from .integrations import collection, generate_speech_bytes, gemini, groq, voice_models
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
 from .ota_sync import background_sync_loop, router as ota_sync_router
 from .pages import router as pages_router
@@ -125,16 +126,23 @@ async def voice_assistant(
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
     gemini_contents = [system_instruction, *sessions[session_id], current_user_message]
 
-    try:
-        result = gemini.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=gemini_contents,
-            config=FAST_GENAI_CONFIG,
-        )
-        response_text = (result.text or "").replace("**", "").replace("*", "").replace("#", "").strip()
-    except Exception as error:
-        print(f"[Gemini Error]: {error}")
-        response_text = "Perdón, tuve un problema procesando eso."
+    response_text = "Perdón, tuve un problema procesando eso."
+    for modelo, configuracion in voice_models():
+        try:
+            result = gemini.models.generate_content(
+                model=modelo,
+                contents=gemini_contents,
+                config=configuracion,
+            )
+            response_text = (result.text or "").replace("**", "").replace("*", "").replace("#", "").strip()
+            break
+        except ServerError as error:
+            # 503 "high demand": el modelo está saturado. Insistirle no sirve,
+            # así que se pasa al siguiente de la lista.
+            print(f"[Gemini] {modelo} no disponible ({error.code}); paso al siguiente.")
+        except Exception as error:
+            print(f"[Gemini Error] {modelo}: {error}")
+            break
 
     sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
     sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
