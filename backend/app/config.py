@@ -65,9 +65,11 @@ FALLBACK_GENAI_CONFIG = types.GenerateContentConfig(
 # reintento nuestro es el modelo de respaldo, que además tiene sentido: al que
 # está sobrecargado no sirve insistirle.
 #
-# 12 s de techo contra un p50 de ~2 s al primer token y ~5 s de respuesta
-# completa: deja lugar para una lenta pero corta el plantón.
+# El techo se paga una vez por modelo. Con 12 s se cortaban respuestas sanas
+# —el primario real dio ReadTimeout en el camino normal— y una respuesta de 15 s
+# es mejor que una disculpa a los 12. Con 18 s el peor caso son 36 s, que
+# requiere que los dos modelos se cuelguen; el caso típico son ~5 s.
 GENAI_HTTP_OPTIONS = types.HttpOptions(
-    timeout=12_000,  # milisegundos, por intento
+    timeout=18_000,  # milisegundos, por intento
     retry_options=types.HttpRetryOptions(attempts=1),
 )

@@ -42,4 +42,4 @@ def test_no_hay_reintentos_contra_el_mismo_modelo():
     20 s llegó a 41 s de ReadTimeout. El reintento es el modelo de respaldo.
     """
     assert GENAI_HTTP_OPTIONS.retry_options.attempts <= 1
-    assert GENAI_HTTP_OPTIONS.timeout <= 15_000, "milisegundos, y se paga una vez por modelo"
+    assert GENAI_HTTP_OPTIONS.timeout <= 20_000, "milisegundos, y se paga una vez por modelo"
