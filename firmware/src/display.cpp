@@ -119,8 +119,8 @@ void updateFace() {
 }
 }
 
-Panel240 tft;
-LGFX_Sprite faceCanvas(&tft);
+TFT_eSPI tft = TFT_eSPI();
+TFT_eSprite faceCanvas = TFT_eSprite(&tft);
 
 void configModeCallback(WiFiManager* wifiManager) {
   Serial.println("Entrando a Modo Configuracion WiFi");
