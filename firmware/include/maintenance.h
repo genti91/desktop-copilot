@@ -6,7 +6,7 @@
 //
 // Cuando vivían en loop(), cada petición HTTP bloqueaba el bucle entero: no se
 // leía el sensor táctil ni se alimentaba el decodificador de MP3 mientras
-// duraba. Con la URL de la LAN eran decenas de milisegundos; a través de
-// Tailscale Funnel es un handshake TLS completo cada 5 segundos, y ahí se
+// duraba. Son decenas de milisegundos por pedido, pero el OTA descarga un
+// binario entero y levantar el tunel del tailnet puede tardar segundos: ahí se
 // empiezan a perder toques y a cortarse el audio.
 void startMaintenanceTask();

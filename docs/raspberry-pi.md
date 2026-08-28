@@ -12,13 +12,14 @@ tu celular / laptop (en cualquier lado)
         |- OctoPrint  :80
         \- backend    :8000  (protegido con password)
 
-ESP32 (misma casa)
-  -> IP local de la Pi :8000     <- NO pasa por el tunel
+ESP32 (en cualquier lado)
+  -> Tailscale (MicroLink, cliente de tailnet corriendo en el ESP32)
+     -> Raspberry Pi :8000     <- WireGuard punto a punto, sin pasar por relay
 ```
 
-Por defecto el ESP32 habla HTTP plano contra la IP local, que es lo mas simple
-y rapido mientras viva en tu escritorio. Si lo vas a mover de red, el firmware
-tambien habla HTTPS: ver "El ESP32 desde cualquier red" al final.
+El ESP32 entra al tailnet como un nodo mas y le habla a la Pi directo por su IP
+`100.x`. Si estan en la misma LAN, WireGuard descubre el camino local y el
+trafico ni siquiera sale a internet. Ver "El ESP32 desde cualquier red".
 
 ## Antes de empezar
 
@@ -171,15 +172,17 @@ minutos; no necesita nada abierto hacia adentro, funciona detras de CGNAT.
 
 ## Opcional: acceso publico
 
-Tailscale cubre tus dispositivos. Si necesitas un link que abra en cualquier
-navegador sin instalar nada:
+Tailscale cubre tus dispositivos, incluido el ESP32. Si necesitas un link que
+abra en cualquier navegador sin instalar nada:
 
 ```bash
 sudo tailscale funnel 8000
 ```
 
 Te da una URL `https://<maquina>.<tailnet>.ts.net` publica. Funciona solo para
-HTTP/HTTPS, no para puertos arbitrarios.
+HTTP/HTTPS, no para puertos arbitrarios. Sirve para entrar al panel desde un
+navegador prestado; el ESP32 ya no la usa, porque entra al tailnet por su cuenta
+y el firmware no habla TLS.
 
 Con eso el backend queda expuesto a internet, asi que `PANEL_PASSWORD` deja de
 ser opcional. La alternativa mas robusta es Cloudflare Tunnel con Cloudflare
@@ -193,24 +196,30 @@ proxea a `localhost`, asi que todo lo que entra por el tunel llega como
 
 ## El ESP32 desde cualquier red
 
-Tailscale no corre en el ESP32, pero tampoco hace falta: alcanza con que el
-dispositivo pueda *llegar* al backend. Funnel le da una URL publica con HTTPS.
+El ESP32 corre su propio cliente de Tailscale: [MicroLink](https://github.com/CamM2325/microlink),
+un componente de ESP-IDF que implementa el protocolo ts2021 completo (registro
+contra el control plane, WireGuard, DISCO y STUN para atravesar NAT, y DERP
+como relay de ultimo recurso).
 
-### 1. Habilitar Funnel
+La diferencia con exponer el backend por Funnel es el camino que hace el
+trafico. Con Funnel el audio sale de tu casa hacia los servidores de Tailscale
+y vuelve a entrar; con el tailnet, DISCO abre un agujero UDP entre el ESP32 y
+la Pi y los paquetes van directo. Si ademas estan en la misma red, el camino
+que gana es el local. De paso el backend deja de estar publicado en internet.
 
-La primera vez hay que habilitarlo en la consola de administracion; el comando
-te da el link exacto:
+### 1. Generar una auth key
 
-```bash
-tailscale funnel --bg 8000
-```
+En [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys),
+"Generate auth key". Conviene marcarla como reusable si vas a flashear varios
+dispositivos.
 
-Una vez habilitado, el backend queda en `https://<maquina>.<tailnet>.ts.net`.
+La key se usa una sola vez, para registrar el nodo: despues las claves quedan en
+la NVS del ESP32 y el dispositivo se reconecta solo en cada arranque.
 
 ### 2. Poner el token del dispositivo
 
-Al entrar por el tunel el ESP32 ya no viene de una red confiable, asi que
-necesita `DEVICE_TOKEN` en `backend/.env`:
+`TRUSTED_NETWORKS` no cubre el rango del tailnet, asi que el ESP32 llega como un
+cliente cualquiera y necesita `DEVICE_TOKEN` en `backend/.env`:
 
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(24))"
@@ -218,31 +227,91 @@ python3 -c "import secrets; print(secrets.token_urlsafe(24))"
 
 Y reiniciar: `sudo systemctl restart desktop-copilot`.
 
-Sin esto el dispositivo recibe 401 por el tunel, que es el comportamiento
-correcto: el backend quedo publico y no queremos que cualquiera le mande audio.
-
 ### 3. Configurar el ESP32
 
-Manten presionado el reset hasta que abra el portal `ESP32_Asistente` y carga:
+Dale reset **sin tocar nada**. Apenas arranca, la pantalla pide "Toca para
+configurar" y espera 3 segundos: tocá el sensor ahi y abre el portal
+`ESP32_Asistente` aunque el Wi-Fi conecte bien. Conectate a esa red y carga:
 
-- **URL del backend**: `https://<maquina>.<tailnet>.ts.net/voice-assistant`
+- **URL del backend**: `http://octopi:8000/voice-assistant`
 - **Token del dispositivo**: el que generaste arriba
+- **Auth key de Tailscale**: la del paso 1
 
-Los dos quedan en `/config.txt` de LittleFS (URL en la primera linea, token en la
-segunda).
+Los tres quedan en `/config.txt` de LittleFS, una por linea, y sobreviven a los
+flasheos. Ese mismo gesto sirve despues para cambiar cualquiera de los tres: sin
+el, el portal solo aparece cuando el Wi-Fi no conecta, y un dispositivo ya
+configurado se queda sin forma de editarlos.
+
+La ventana va despues del arranque y no durante a proposito. El sensor tactil se
+autocalibra al energizarse: un dedo apoyado mientras bootea pasa a ser su linea
+de base, y a partir de ahi la lectura queda invertida.
+
+El portal se cierra solo a los 5 minutos y reinicia, para que una lectura falsa
+del sensor no deje la placa colgada esperando.
+
+`octopi` es el nombre del nodo en el tailnet, no un nombre DNS: el ESP32 no
+consulta MagicDNS, lo resuelve contra la lista de peers que le llega del control
+plane. Tambien podes poner la IP `100.x` directamente.
+
+En la pantalla, despues de "Conectado!", aparece la IP `100.x` que le toco. Si
+no aparece, el registro fallo y el firmware sigue hablando contra la URL tal
+cual quedo configurada.
 
 ### Como lo resuelve el firmware
 
-`backend.cpp` decide el transporte segun el esquema de la URL: `WiFiClient` plano
-para `http://`, `WiFiClientSecure` con el root CA de Let's Encrypt para
-`https://` (Funnel usa certificados suyos). El puerto sale del esquema cuando la
-URL no lo dice, que es el caso de Funnel. El token viaja en `X-Device-Token` en
-todos los pedidos: el audio, el sondeo de configuracion, la imagen y el OTA.
+`tailnet.cpp` arranca MicroLink despues del Wi-Fi y antes del chequeo de OTA,
+porque el backend puede estar solamente adentro del tailnet.
 
-El certificado embebido es ISRG Root X1, que vence en junio de 2035.
+Todo pedido pasa por `beginBackendRequest()`, que hace dos cosas antes de abrir
+el socket: resuelve el host contra la tabla de peers (una vez, cacheado) y se
+asegura de que haya sesion de WireGuard viva contra la Pi. Ese segundo paso hace
+falta porque lwIP rutea `100.64.0.0/10` por el netif del tunel: sin handshake
+previo, `connect()` vuelve con `EHOSTUNREACH`. Se saltea solo si el tunel se
+uso en los ultimos 60 segundos.
+
+De ahi para arriba no cambia nada: el mismo `HTTPClient` sobre sockets BSD
+comunes, con `X-Action` y `X-Device-Token`.
+
+El firmware ya no habla TLS. Antes lo necesitaba para llegar a la URL publica de
+Funnel; adentro del tailnet el cifrado lo pone WireGuard, asi que se fueron
+`WiFiClientSecure`, el root CA embebido y el handshake de mbedtls, que era lo
+mas caro de cada sondeo. Un `https://` cargado a mano en el portal se normaliza
+a `http://`.
+
+### El keepalive: por que hace falta
+
+Hay un rodeo instalado en la Pi, `desktop-copilot-keepalive.service`, que hace un
+`ping` al ESP32 cada 30 segundos.
+
+El motivo es una limitacion de MicroLink: **el ESP32 no logra iniciar el handshake
+de WireGuard contra `tailscaled`**. Sus initiations se descartan en silencio, tanto
+por el camino directo como por DERP, aunque DISCO funcione en las dos direcciones
+por esa misma IP y puerto, y aunque la clave publica del peer sea la correcta. Al
+reves anda perfecto: cuando la Pi inicia, el tunel levanta y el ESP32 conecta al
+backend en ~16 ms.
+
+Como WireGuard descarta una sesion recien a los ~180 segundos de inactividad, un
+ping cada 30 alcanza para que nunca caduque y el dispositivo siempre encuentre el
+tunel armado.
+
+Se instala solo con `install-pi.sh`. A mano:
+
+```bash
+sudo cp deploy/desktop-copilot-keepalive.service /etc/systemd/system/
+sudo systemctl enable --now desktop-copilot-keepalive
+```
+
+Cuando se arregle upstream esto se saca entero:
+
+```bash
+sudo systemctl disable --now desktop-copilot-keepalive
+```
 
 ### Si algo falla
 
 Volves a entrar al portal cautivo (que es local, no depende del tunel) y pones
-de nuevo la URL de la LAN. Por eso conviene probar el OTA en la red local antes
-de mover el dispositivo.
+la IP de la LAN de la Pi, sin auth key. Por eso conviene probar el OTA en la red
+local antes de mover el dispositivo.
+
+Los logs de MicroLink salen por el mismo monitor serie que el resto del firmware
+(`pio device monitor`), con el prefijo `ml_`.

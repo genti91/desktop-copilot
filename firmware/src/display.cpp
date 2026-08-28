@@ -1,4 +1,5 @@
 #include <LittleFS.h>
+#include <driver/gpio.h>
 #include "display.h"
 #include "device_config.h"
 
@@ -128,7 +129,9 @@ void configModeCallback(WiFiManager* wifiManager) {
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.drawCentreString("Sin conexion", SCREEN_W / 2, 40, 1);
+  // Sirve para los dos casos: el Wi-Fi que no conecta y el portal abierto a mano
+  // desde el sensor tactil.
+  tft.drawCentreString("Configuracion", SCREEN_W / 2, 40, 1);
   tft.drawCentreString("Conectate al WiFi:", SCREEN_W / 2, 80, 1);
 
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
@@ -145,11 +148,24 @@ void setFaceMode(FaceMode mode) {
   currentFaceMode = mode;
 }
 
+// La luz de fondo va por D6, que en el XIAO es GPIO43 = U0TXD. El gestor de
+// periféricos de Arduino 3.x no entrega un pin que sigue anotado como UART, así
+// que pinMode() lo rechaza y digitalWrite() imprime "IO 43 is not set as GPIO"
+// sin hacer nada. Arduino 2.x no tenía ese gestor y el digitalWrite pasaba
+// directo: por eso el encendido y apagado de la pantalla dejó de funcionar en la
+// migración. Se va por el driver de IDF, que no consulta esa tabla. La consola
+// sale por USB, así que UART0 no se usa para nada.
 void setDisplayPower(bool enabled) {
-  pinMode(PIN_TFT_BL, OUTPUT);
+  static bool backlightReady = false;
+  const gpio_num_t backlight = static_cast<gpio_num_t>(PIN_TFT_BL);
+  if (!backlightReady) {
+    gpio_reset_pin(backlight);
+    gpio_set_direction(backlight, GPIO_MODE_OUTPUT);
+    backlightReady = true;
+  }
   if (enabled && !displayPowered) idleImageDrawn = false;
   displayPowered = enabled;
-  digitalWrite(PIN_TFT_BL, enabled ? HIGH : LOW);
+  gpio_set_level(backlight, enabled ? 1 : 0);
 }
 
 bool loadIdleImage(const char* path) {

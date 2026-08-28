@@ -1,8 +1,10 @@
+// WiFi.h primero: ver la nota en backend.h sobre el orden de los includes.
+#include <WiFi.h>
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
-#include <WiFi.h>
 #include "backend.h"
 #include "commands.h"
 #include "display.h"
@@ -226,7 +228,6 @@ void updateDeviceSettings() {
   if (!backendReachable) {
     pollIntervalMs = SETTINGS_RETRY_INTERVAL_MS;
   } else {
-    pollIntervalMs = backendUsesTls() ? SETTINGS_REMOTE_POLL_INTERVAL_MS
-                                      : SETTINGS_POLL_INTERVAL_MS;
+    pollIntervalMs = SETTINGS_POLL_INTERVAL_MS;
   }
 }

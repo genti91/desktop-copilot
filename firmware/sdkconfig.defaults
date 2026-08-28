@@ -1,0 +1,93 @@
+# Configuracion de ESP-IDF para el firmware.
+#
+# Aparece con MicroLink: al compilar Arduino como componente de IDF, las
+# opciones que antes venian resueltas por el framework precompilado (PSRAM,
+# consola, particiones) hay que declararlas aca.
+
+# --- Placa -------------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# PSRAM octal: la usan el buffer de PCM, el sprite de la cara, el cuerpo del
+# pedido multipart y los buffers del control plane de Tailscale.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Igual que el framework Arduino precompilado: malloc() sirve desde PSRAM todo
+# lo que pase de 4 KB. Con USE_CAPS_ALLOC en su lugar, malloc se queda en RAM
+# interna y el decodificador de MP3 no consigue su buffer una vez que MicroLink
+# ocupa lo suyo: 18 KB libres y el mayor bloque en 8 KB.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=0
+
+# --- Arduino como componente -------------------------------------------------
+CONFIG_AUTOSTART_ARDUINO=y
+# Sin esto el build toma el variant generico y D4/D5/D6 dejan de existir.
+CONFIG_ARDUINO_VARIANT="XIAO_ESP32S3"
+CONFIG_ARDUINO_RUNNING_CORE=1
+CONFIG_ARDUINO_EVENT_RUNNING_CORE=1
+CONFIG_ARDUINO_LOOP_STACK_SIZE=8192
+CONFIG_FREERTOS_HZ=1000
+
+# El XIAO S3 se ve por el USB Serial/JTAG del chip. Mandar tambien ESP_LOG ahi
+# es lo que deja ver los logs de MicroLink en el mismo monitor.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- Particiones -------------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- lwIP --------------------------------------------------------------------
+# WireGuard mete un netif propio y sus sockets crudos; las ventanas TCP mas
+# grandes son las que sostienen el WAV de subida y el MP3 de vuelta.
+CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+
+# --- mbedTLS -----------------------------------------------------------------
+# El handshake Noise de WireGuard usa ChaCha20-Poly1305 y HKDF. TLS 1.2 sigue
+# habilitado porque el firmware conserva el camino https contra el backend.
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HKDF_C=y
+CONFIG_MBEDTLS_SSL_PROTO_TLS1_2=y
+
+# --- Wi-Fi -------------------------------------------------------------------
+# Sin agregacion la latencia por paquete baja, que es lo que interesa cuando
+# arriba viaja audio dentro del tunel.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+
+# --- Watchdog ----------------------------------------------------------------
+# El registro inicial contra el control plane es CPU pura y no cede; con los 5 s
+# de fabrica el watchdog reiniciaba la placa.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# Solo se vigila el IDLE del nucleo 0, que es lo que hacia el framework Arduino
+# precompilado. En el nucleo 1 conviven loopTask y la tarea de mantenimiento, y
+# el decodificador de MP3 corre a fondo sin ceder: con el IDLE1 vigilado el
+# watchdog reinicia la placa en cada reproduccion. maintenance.cpp esta escrito
+# sobre esta premisa.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
+# --- MicroLink ---------------------------------------------------------------
+# Los buffers de fabrica (512 KB cada uno) estan pensados para tailnets de
+# cientos de nodos. Este es un tailnet personal: 128 KB alcanzan de sobra y
+# dejan la PSRAM para el audio.
+CONFIG_ML_H2_BUFFER_SIZE_KB=128
+CONFIG_ML_JSON_BUFFER_SIZE_KB=128
+CONFIG_ML_MAX_PEERS=16
+# La configuracion del dispositivo ya la sirve el portal cautivo de WiFiManager.
+CONFIG_ML_ENABLE_CONFIG_HTTPD=n
+CONFIG_ML_ENABLE_CELLULAR=n

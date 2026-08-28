@@ -26,6 +26,8 @@ jobs:
         with:
           # El build sale de la cantidad de commits, asi que hace falta el historial completo.
           fetch-depth: 0
+          # MicroLink es un submodulo: sin esto el componente no existe y CMake falla.
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
