@@ -4,18 +4,25 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from google.genai import types
 
 from .auth import install_auth
 from .config import APP_TITLE, FAST_GENAI_CONFIG, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
 from .device import router as device_router
-from .integrations import collection, generate_speech_bytes, gemini, groq
+from .integrations import (
+    collection,
+    generate_speech_bytes,
+    gemini,
+    groq,
+    stream_speech_bytes,
+)
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
 from .ota_sync import background_sync_loop, router as ota_sync_router
 from .pages import router as pages_router
 from .services import extract_and_save_data, process_meeting_storage
 from .state import sessions, state_memory
+from .streaming import aiter_to_thread, split_ready_sentences
 
 
 @asynccontextmanager
@@ -96,7 +103,11 @@ async def voice_assistant(
     user_text = ""
     if groq:
         try:
-            transcription = groq.audio.transcriptions.create(
+            # El SDK de Groq es sincrónico. Dentro de un endpoint async frena el
+            # event loop, y con el streaming eso ya no es gratis: mientras el
+            # loop está tomado no sale el audio que ya tenemos sintetizado.
+            transcription = await asyncio.to_thread(
+                groq.audio.transcriptions.create,
                 file=(file.filename or "audio.webm", audio_bytes),
                 model="whisper-large-v3-turbo",
                 language="es",
@@ -105,7 +116,7 @@ async def voice_assistant(
         except Exception as error:
             print(f"[Groq STT Error]: {error}")
 
-    context_text = _retrieve_context(user_text)
+    context_text = await asyncio.to_thread(_retrieve_context, user_text)
     system_instruction = f"""
     {state_memory["assistant_personality"]}
     Sos capaz de recordar notas de reuniones y controlar las luces de su escritorio.
@@ -117,6 +128,10 @@ async def voice_assistant(
     - Apagar Filamento: usa [CMD:FILAMENT_OFF].
     - Apagar todos los LEDs y el display: usa [CMD:ALL_OFF]. La próxima vez que se toque el botón de voz, todo volverá a encenderse.
     Si no te pide interactuar con las luces, no incluyas ningún [CMD:].
+    Si incluís alguno, poné TODOS los [CMD:...] juntos al principio de la respuesta,
+    antes de cualquier texto hablado. El dispositivo los recibe en la cabecera del
+    audio, que sale antes de que termines de escribir: los que aparezcan más tarde
+    llegan tarde y se pierden.
 
     [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
     Usa esta información para responder sus dudas sobre proyectos:
@@ -125,23 +140,47 @@ async def voice_assistant(
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
     gemini_contents = [system_instruction, *sessions[session_id], current_user_message]
 
-    try:
-        result = gemini.models.generate_content(
+    text_stream = aiter_to_thread(
+        lambda: gemini.models.generate_content_stream(
             model="gemini-3.1-flash-lite",
             contents=gemini_contents,
             config=FAST_GENAI_CONFIG,
         )
-        response_text = (result.text or "").replace("**", "").replace("*", "").replace("#", "").strip()
+    )
+
+    # Primera etapa: consumir hasta tener algo que decir. Hace falta cortar acá
+    # porque X-Action viaja en la cabecera, y la cabecera sale antes que el
+    # cuerpo: para cuando empiece a salir audio, los comandos ya tienen que estar
+    # decididos. Por eso el prompt le pide al modelo que los ponga primero.
+    buffer = ""
+    full_text = ""
+    pending_chunks: list[str] = []
+    exhausted = False
+    try:
+        async for piece in text_stream:
+            fragment = getattr(piece, "text", None) or ""
+            if not fragment:
+                continue
+            buffer += fragment
+            full_text += fragment
+            pending_chunks, buffer = split_ready_sentences(buffer)
+            if pending_chunks:
+                break
+        else:
+            exhausted = True
     except Exception as error:
-        print(f"[Gemini Error]: {error}")
-        response_text = "Perdón, tuve un problema procesando eso."
+        print(f"[Gemini Stream Error]: {error}")
+        return Response(
+            content=await generate_speech_bytes("Perdón, tuve un problema procesando eso."),
+            media_type="audio/mpeg",
+            headers={"X-Action": "NONE"},
+        )
 
-    sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
-    sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
+    if exhausted:
+        pending_chunks, buffer = split_ready_sentences(buffer, flush=True)
 
-    commands = re.findall(r"\[CMD:(.*?)\]", response_text, re.IGNORECASE)
+    commands = re.findall(r"\[CMD:(.*?)\]", full_text, re.IGNORECASE)
     action_command = "|".join(commands).upper() if commands else "NONE"
-    spoken_text = re.sub(r"\[CMD:.*?\]\s*", "", response_text, flags=re.IGNORECASE).strip()
 
     if user_text and background_tasks:
         background_tasks.add_task(
@@ -150,12 +189,70 @@ async def voice_assistant(
             state_memory["last_project_name"],
         )
 
-    audio_response = await generate_speech_bytes(spoken_text)
-    return Response(
-        content=audio_response,
+    async def speak(chunk: str):
+        spoken = _spoken_text(chunk)
+        if not spoken:
+            return
+        async for audio in stream_speech_bytes(spoken):
+            yield audio
+
+    async def audio_body():
+        nonlocal buffer, full_text
+        said_something = False
+
+        for chunk in pending_chunks:
+            async for audio in speak(chunk):
+                said_something = True
+                yield audio
+
+        if not exhausted:
+            try:
+                # El generador se reanuda donde lo dejó la primera etapa.
+                async for piece in text_stream:
+                    fragment = getattr(piece, "text", None) or ""
+                    if not fragment:
+                        continue
+                    buffer += fragment
+                    full_text += fragment
+                    ready, buffer = split_ready_sentences(buffer)
+                    for chunk in ready:
+                        async for audio in speak(chunk):
+                            said_something = True
+                            yield audio
+            except Exception as error:
+                # La cabecera ya salió, así que no hay forma de avisar del error
+                # más que cortando el audio donde quedó.
+                print(f"[Gemini Stream Error]: {error}")
+
+            ready, buffer = split_ready_sentences(buffer, flush=True)
+            for chunk in ready:
+                async for audio in speak(chunk):
+                    said_something = True
+                    yield audio
+
+        if not said_something:
+            async for audio in stream_speech_bytes("Perdón, tuve un problema procesando eso."):
+                yield audio
+
+        late = re.findall(r"\[CMD:(.*?)\]", full_text, re.IGNORECASE)
+        if len(late) > len(commands):
+            print(f"[CMD tardío]: el modelo pidió {late[len(commands):]} después de la cabecera.")
+
+        response_text = _spoken_text(full_text)
+        sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
+        sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
+
+    return StreamingResponse(
+        audio_body(),
         media_type="audio/mpeg",
         headers={"X-Action": action_command},
     )
+
+
+def _spoken_text(text: str) -> str:
+    """Deja sólo lo que hay que pronunciar: sin markdown y sin los [CMD:]."""
+    clean = text.replace("**", "").replace("*", "").replace("#", "")
+    return re.sub(r"\[CMD:.*?\]\s*", "", clean, flags=re.IGNORECASE).strip()
 
 
 def _retrieve_context(user_text: str) -> str:

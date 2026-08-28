@@ -1,7 +1,7 @@
 import io
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import edge_tts
 from google import genai
@@ -149,10 +149,24 @@ def save_project_to_rag(meeting_title: str, project: ProjectSummary) -> str:
     return document_id
 
 
-async def generate_speech_bytes(text: str) -> bytes:
-    communicate = edge_tts.Communicate(text, "es-AR-TomasNeural")
-    buffer = io.BytesIO()
+VOICE = "es-AR-TomasNeural"
+
+
+async def stream_speech_bytes(text: str) -> AsyncIterator[bytes]:
+    """Suelta el MP3 a medida que edge-tts lo va generando.
+
+    Los segmentos que salen de acá se concatenan tal cual: el MPEG audio es una
+    cadena de frames independientes, así que pegar dos síntesis seguidas da un
+    stream que el decodificador reproduce sin cortes.
+    """
+    communicate = edge_tts.Communicate(text, VOICE)
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
-            buffer.write(chunk["data"])
+            yield chunk["data"]
+
+
+async def generate_speech_bytes(text: str) -> bytes:
+    buffer = io.BytesIO()
+    async for chunk in stream_speech_bytes(text):
+        buffer.write(chunk)
     return buffer.getvalue()
