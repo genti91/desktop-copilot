@@ -7,4 +7,5 @@ notion-client
 pillow
 python-dotenv
 python-multipart
+tinytuya
 uvicorn[standard]

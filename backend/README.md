@@ -14,6 +14,7 @@ backend/
 │   ├── ota_sync.py        # Espejado del firmware desde releases de GitHub
 │   ├── pages.py           # Layout, navegación y páginas del panel
 │   ├── integrations.py    # Gemini, Groq, Notion y TTS
+│   ├── lights.py          # Tools de luces: LEDs del ESP32 y lámparas Tuya
 │   ├── vectorstore.py     # Memoria consultable (RAG) sobre SQLite
 │   ├── main.py            # Aplicación y endpoints HTTP
 │   ├── models.py          # Schemas Pydantic
@@ -101,6 +102,34 @@ Todo lo configurable vive en `data/` y sobrevive reinicios del backend:
 - `data/device_config.json` — colores, encendidos e imagen elegida (con `revision`).
 - `data/images/` — imágenes subidas desde la web, normalizadas a 240x240 PNG.
 - `data/firmware/firmware.bin` + `manifest.json` — firmware publicado para OTA.
+
+## Control de luces por voz
+
+`/voice-assistant` usa **function calling manual**: el modelo hace una sola
+llamada y, si decide tocar las luces, devuelve un `function_call` que `main.py`
+ejecuta al vuelo (`app/lights.py`). No hay segunda llamada al modelo —la
+confirmación hablada sale del propio modelo o, si no dijo nada, de una frase
+armada a partir de la acción—.
+
+Dos destinos:
+
+- **`controlar_asistente_escritorio`** — LED RGB, filamento y apagado del propio
+  ESP32. No se le habla directo: se arma la orden en la mini-sintaxis que ya
+  entiende `commands.cpp` y viaja en la cabecera `X-Action` de la respuesta.
+- **`controlar_lampara_habitacion`** — lámparas Tuya de la habitación, por LAN
+  con `tinytuya`. Sólo se le ofrece al modelo si hay lámparas configuradas.
+
+Para las Tuya, sacá los datos de cada lámpara con `python -m tinytuya wizard`
+(necesita un proyecto en el Tuya IoT Platform linkeado a la cuenta de la app) y
+poné una reserva de DHCP para que no les cambie la IP. Después:
+
+```text
+TUYA_LAMPS=[{"nombre":"velador","id":"...","key":"...","ip":"192.168.1.50","version":"3.4"}]
+```
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `TUYA_LAMPS` | `[]` | Lista JSON de lámparas Tuya (nombre, id, key, ip, version) |
 
 ## Firmware automático
 

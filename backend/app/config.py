@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -36,6 +37,23 @@ SESSION_HOURS = int(os.getenv("SESSION_HOURS", "720"))
 # o con este token si algún día sale a internet.
 DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "")
 TRUSTED_NETWORKS = os.getenv("TRUSTED_NETWORKS", "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12")
+
+# Lámparas Tuya de la habitación, controladas por LAN con tinytuya. El asistente
+# de voz las prende/apaga y les cambia el color por function calling.
+#
+# Formato: una lista JSON en la variable de entorno, un objeto por lámpara con
+#   nombre, id, key, ip y (opcional) version del protocolo local.
+# Ej: TUYA_LAMPS=[{"nombre":"velador","id":"...","key":"...","ip":"192.168.1.50","version":"3.4"}]
+# Los valores salen de `python -m tinytuya wizard`. Sin esto no se registra
+# ninguna lámpara y la función Tuya no se le ofrece al modelo.
+_tuya_lamps_raw = os.getenv("TUYA_LAMPS", "").strip()
+try:
+    TUYA_LAMPS = json.loads(_tuya_lamps_raw) if _tuya_lamps_raw else []
+    if not isinstance(TUYA_LAMPS, list):
+        raise ValueError("TUYA_LAMPS tiene que ser una lista JSON")
+except (json.JSONDecodeError, ValueError) as error:
+    print(f"[Config] TUYA_LAMPS inválido, se ignora: {error}")
+    TUYA_LAMPS = []
 
 FAST_GENAI_CONFIG = types.GenerateContentConfig(
     thinking_config=types.ThinkingConfig(thinking_budget=0),

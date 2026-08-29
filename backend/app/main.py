@@ -11,6 +11,12 @@ from .auth import install_auth
 from .config import APP_TITLE, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
 from .device import router as device_router
 from .integrations import collection, generate_speech_bytes, gemini, groq, voice_models
+from .lights import (
+    aplicar_accion_luz,
+    build_light_tools,
+    confirmacion_por_defecto,
+    tools_prompt,
+)
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
 from .ota_sync import background_sync_loop, router as ota_sync_router
 from .pages import router as pages_router
@@ -110,13 +116,7 @@ async def voice_assistant(
     {state_memory["assistant_personality"]}
     Sos capaz de recordar notas de reuniones y controlar las luces de su escritorio.
 
-    [CONTROL DE LUCES]
-    - Color NeoPixel: usa [CMD:LED_RGB:R,G,B] (valores de 0 a 255).
-    - Brillo NeoPixel: usa [CMD:LED_BRIGHTNESS:V] (V de 0 a 255).
-    - Encender Filamento: usa [CMD:FILAMENT_ON].
-    - Apagar Filamento: usa [CMD:FILAMENT_OFF].
-    - Apagar todos los LEDs y el display: usa [CMD:ALL_OFF]. La próxima vez que se toque el botón de voz, todo volverá a encenderse.
-    Si no te pide interactuar con las luces, no incluyas ningún [CMD:].
+    {tools_prompt()}
 
     [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
     Usa esta información para responder sus dudas sobre proyectos:
@@ -125,29 +125,72 @@ async def voice_assistant(
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
     gemini_contents = [system_instruction, *sessions[session_id], current_user_message]
 
+    # Function calling MANUAL: una sola llamada al modelo. Si en la respuesta
+    # viene un function_call, lo ejecutamos acá y hablamos una confirmación
+    # breve —del modelo si la dio, o una por defecto—. La segunda llamada que
+    # haría el modo automático (para que el modelo reaccione al resultado) no
+    # vale la pena: el control de luces es fire-and-forget.
+    pending_esp: list[str] = []
+    light_tools = build_light_tools()
+    sin_auto_fc = types.AutomaticFunctionCallingConfig(disable=True)
+
     # Cualquier error pasa al siguiente modelo, sin distinguir el tipo: un 503 y
     # un timeout se ven distinto pero significan lo mismo acá —de este modelo no
     # va a salir la respuesta— y separarlos ya causó que un timeout del primario
     # se saltara el respaldo. Si fallan todos queda la disculpa hablada.
     response_text = "Perdón, tuve un problema procesando eso."
-    for modelo, configuracion in voice_models():
+    for modelo, base_config in voice_models():
+        configuracion = base_config.model_copy(
+            update={"tools": light_tools, "automatic_function_calling": sin_auto_fc}
+        )
         try:
             result = gemini.models.generate_content(
                 model=modelo,
                 contents=gemini_contents,
                 config=configuracion,
             )
-            response_text = (result.text or "").replace("**", "").replace("*", "").replace("#", "").strip()
-            break
         except Exception as error:
             print(f"[Gemini] {modelo} no contestó ({type(error).__name__}); paso al siguiente.")
+            continue
+
+        candidate = result.candidates[0] if result.candidates else None
+        parts = (
+            candidate.content.parts
+            if candidate and candidate.content and candidate.content.parts
+            else []
+        )
+        spoken = "".join(part.text for part in parts if getattr(part, "text", None))
+        llamadas = [part.function_call for part in parts if getattr(part, "function_call", None)]
+
+        fragmentos: list[str] = []
+        for llamada in llamadas:
+            try:
+                frase = await asyncio.to_thread(
+                    aplicar_accion_luz, llamada.name, dict(llamada.args or {}), pending_esp
+                )
+            except Exception as error:
+                print(f"[Luces] {llamada.name} falló ({type(error).__name__}: {error}).")
+                frase = "tuve un problema con las luces"
+            if frase:
+                fragmentos.append(frase)
+
+        if llamadas and not spoken.strip():
+            spoken = confirmacion_por_defecto(fragmentos)
+
+        limpio = spoken.replace("**", "").replace("*", "").replace("#", "").strip()
+        if limpio:
+            response_text = limpio
+        break
 
     sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
     sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
 
-    commands = re.findall(r"\[CMD:(.*?)\]", response_text, re.IGNORECASE)
-    action_command = "|".join(commands).upper() if commands else "NONE"
+    # Red por si un modelo ignora las funciones y escribe [CMD:...] en el texto.
+    comandos_texto = re.findall(r"\[CMD:(.*?)\]", response_text, re.IGNORECASE)
     spoken_text = re.sub(r"\[CMD:.*?\]\s*", "", response_text, flags=re.IGNORECASE).strip()
+
+    acciones = pending_esp + [comando.strip().upper() for comando in comandos_texto]
+    action_command = "|".join(accion for accion in acciones if accion) or "NONE"
 
     if user_text and background_tasks:
         background_tasks.add_task(
