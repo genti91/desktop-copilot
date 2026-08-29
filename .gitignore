@@ -1,1 +1,8 @@
 deploy/*.generated.service
+
+# Artefactos del wizard de tinytuya: traen las local keys de las lámparas.
+# Lo que se usa en runtime vive en backend/.env (TUYA_LAMPS).
+devices.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
