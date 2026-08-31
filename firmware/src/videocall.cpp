@@ -24,7 +24,9 @@ constexpr uint16_t CALL_RELAY_PORT = 8001;
 
 constexpr uint32_t TX_INTERVAL_MS = 90;              // ~11 fps de subida
 constexpr size_t MAX_JPEG_BYTES = 60 * 1024;         // un 240x240 q12 ronda 8 KB
-constexpr uint32_t WAIT_PEER_MS = 55000;             // el relay empareja hasta 45 s
+// Cuánto se muestra "Llamando a ..." esperando que el otro inicie su llamada.
+// Menos que el _PAIR_WAIT_TIMEOUT_S del relay (240 s) para colgar limpio primero.
+constexpr uint32_t WAIT_PEER_MS = 180000;
 constexpr uint32_t MAX_CALL_MS = 10UL * 60 * 1000;
 constexpr uint32_t RX_STALL_MS = 8000;               // sin frames -> se cortó
 

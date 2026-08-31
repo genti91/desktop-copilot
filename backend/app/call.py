@@ -20,7 +20,9 @@ from .config import CALL_RELAY_HOST, CALL_RELAY_PORT
 CALL_TOOL = "iniciar_videollamada"
 
 _HANDSHAKE_TIMEOUT_S = 10
-_PAIR_WAIT_TIMEOUT_S = 45
+# El primero que entra a la sala espera bastante: hacer los dos "llamá a ..."
+# de voz seguidos (grabar + STT + modelo + TTS x2) tarda fácil más de un minuto.
+_PAIR_WAIT_TIMEOUT_S = 240
 _ROOM_MAX_LEN = 80
 _CHUNK = 8192
 
@@ -79,8 +81,10 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         _shut(writer)
         return
 
+    peer = writer.get_extra_info("peername")
     room = raw.decode("utf-8", "replace").strip()[:_ROOM_MAX_LEN]
     if not room:
+        print(f"📹 {peer} conectó sin nombre de sala; lo cierro.")
         _shut(writer)
         return
 
@@ -88,12 +92,14 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
 
     if partner is None:
         # Primero en la sala: queda esperando al segundo.
+        print(f"📹 [{room}] {peer} espera compañero ({_PAIR_WAIT_TIMEOUT_S}s)…")
         llego = asyncio.get_event_loop().create_future()
         termino = asyncio.Event()
         _waiting[room] = (reader, writer, llego, termino)
         try:
             await asyncio.wait_for(llego, _PAIR_WAIT_TIMEOUT_S)
         except (asyncio.TimeoutError, asyncio.CancelledError):
+            print(f"📹 [{room}] nadie más llegó; cierro a {peer}.")
             _waiting.pop(room, None)
             _shut(writer)
             return
@@ -103,6 +109,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         return
 
     # Segundo en la sala: empareja y hace de puente en los dos sentidos.
+    print(f"📹 [{room}] {peer} emparejado; puente abierto.")
     p_reader, p_writer, p_llego, p_termino = partner
     if not p_llego.done():
         p_llego.set_result(True)
@@ -110,6 +117,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         await _bridge(p_reader, p_writer, reader, writer)
     finally:
         p_termino.set()
+        print(f"📹 [{room}] puente cerrado.")
 
 
 async def call_relay_server() -> None:
