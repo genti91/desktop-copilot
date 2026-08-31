@@ -3,6 +3,7 @@
 #include "commands.h"
 #include "device_config.h"
 #include "display.h"
+#include "videocall.h"
 
 namespace {
 uint8_t currentRed = 255;
@@ -116,6 +117,10 @@ void executeDeviceCommand(String command) {
       sleeping = true;
       outputsNeedUpdate = true;
       Serial.println("🌙 LEDs y display APAGADOS");
+    } else if (singleCommand.startsWith("CALL:")) {
+      // La llamada la levanta loop() cuando termina de sonar la respuesta: acá
+      // sólo se anota a quién.
+      requestVideoCall(singleCommand.substring(5));
     }
 
     startIndex = pipeIndex + 1;

@@ -6,5 +6,5 @@ FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.c*)
 idf_component_register(
     SRCS ${app_sources}
     INCLUDE_DIRS "." "../include"
-    REQUIRES ${ARDUINO_COMPONENT} microlink espressif__esp-sr
+    REQUIRES ${ARDUINO_COMPONENT} microlink espressif__esp-sr espressif__esp32-camera
 )

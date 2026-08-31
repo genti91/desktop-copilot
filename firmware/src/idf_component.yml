@@ -1,0 +1,9 @@
+## Dependencias que resuelve el gestor de componentes de ESP-IDF.
+##
+## esp-sr (wake word) y sus dependencias ya venían con el bundle de Arduino
+## sobre IDF y quedaron en managed_components/. La cámara no: Arduino la trae
+## sólo en sus libs precompiladas, no cuando se compila como componente. El
+## primer build después de esto la baja del registro (necesita internet una vez)
+## y la deja en managed_components/espressif__esp32-camera/.
+dependencies:
+  espressif/esp32-camera: "^2.0.0"

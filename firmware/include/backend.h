@@ -15,9 +15,13 @@
 // WireGuard, y para eso no hace falta TLS arriba.
 constexpr size_t SERVER_URL_SIZE = 192;
 constexpr size_t DEVICE_TOKEN_SIZE = 96;
+// Nombre de este equipo, para armar la sala de la videollamada. Se completa en
+// el portal cautivo y vive en la 4ta linea de /config.txt.
+constexpr size_t DEVICE_NAME_SIZE = 32;
 
 extern char server_url[SERVER_URL_SIZE];
 extern char device_token[DEVICE_TOKEN_SIZE];
+extern char device_name[DEVICE_NAME_SIZE];
 
 // Partes de server_url ya resueltas, con el puerto 80 por defecto.
 // Host tal cual quedo configurado, sin resolver: sirve para mostrarlo.
@@ -29,6 +33,10 @@ String backendPath();
 // Dentro del tailnet el host viaja ya resuelto a su IP 100.x, porque el ESP32 no
 // tiene forma de preguntarle MagicDNS a un servidor DNS.
 String backendBaseUrl();
+
+// Host al que abrir el socket, ya resuelto a la IP 100.x si el tailnet está
+// arriba. Lo usa la videollamada para llegar al relay (otro puerto, mismo host).
+String backendConnectHost();
 
 // URL del endpoint de voz, con el mismo host resuelto que backendBaseUrl().
 String backendVoiceUrl();
