@@ -127,3 +127,38 @@ def test_call_action_without_a_name_does_nothing():
     frase = call.aplicar_accion_llamada({"persona": "  "}, pending)
     assert pending == []
     assert "no entend" in frase.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Llamada entrante (aviso por /device/config)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _limpiar_incoming():
+    call._incoming.clear()
+    yield
+    call._incoming.clear()
+
+
+def test_calling_registers_an_incoming_for_the_callee():
+    call.aplicar_accion_llamada({"persona": "josefina"}, [], caller="franco")
+    assert call.incoming_call_for("josefina") == "franco"
+    assert call.incoming_call_for("franco") is None  # el que llama no
+
+
+def test_incoming_call_expires():
+    call.note_incoming_call("josefina", "franco")
+    call._incoming["josefina"] = ("franco", call.time.monotonic() - call._INCOMING_TTL_S - 1)
+    assert call.incoming_call_for("josefina") is None
+
+
+def test_pairing_clears_pending_incomings():
+    call.note_incoming_call("josefina", "franco")
+    call.clear_incoming("franco", "josefina")
+    assert call.incoming_call_for("josefina") is None
+
+
+def test_no_incoming_without_a_caller_name():
+    call.aplicar_accion_llamada({"persona": "josefina"}, [], caller="")
+    assert call.incoming_call_for("josefina") is None

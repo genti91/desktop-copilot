@@ -75,6 +75,25 @@ def test_config_update_persists_and_bumps_revision(client, data_dir):
     assert client.post("/device/config", json={"display_enabled": False}).json()["revision"] == 3
 
 
+def test_incoming_call_shows_up_in_config_for_the_callee(client):
+    from app import call
+
+    call._incoming.clear()
+    call.note_incoming_call("josefina", "franco")
+
+    # Sin la cabecera de nombre no aparece.
+    assert "incoming_call" not in client.get("/device/config").json()
+
+    payload = client.get("/device/config", headers={"X-Device-Name": "Josefina"}).json()
+    assert payload["incoming_call"] == {"from": "franco"}
+
+    # Para el que llama, nada.
+    assert "incoming_call" not in client.get(
+        "/device/config", headers={"X-Device-Name": "franco"}
+    ).json()
+    call._incoming.clear()
+
+
 def test_outputs_toggle_independently(client):
     client.post(
         "/device/config",

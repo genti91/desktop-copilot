@@ -217,8 +217,14 @@ void loop() {
     wakeWordResume();
   }
 
+  // Llamada entrante detectada en el último sondeo de /device/config.
+  if (incomingCallPending()) {
+    runIncomingCall();
+  }
+
   // Una respuesta pudo traer "CALL:<persona>": la llamada bloquea, así que va
   // acá y no en executeDeviceCommand(), que corre mientras se despacha el audio.
+  // Atender una entrante también deja una llamada pendiente por acá.
   if (videoCallPending()) {
     runVideoCall();
   }

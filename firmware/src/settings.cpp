@@ -9,6 +9,7 @@
 #include "commands.h"
 #include "display.h"
 #include "settings.h"
+#include "videocall.h"
 
 namespace {
 
@@ -199,6 +200,11 @@ bool refreshDeviceSettings(bool force) {
     Serial.printf("⚠️ Configuración remota ilegible (%s).\n", error.c_str());
     return false;
   }
+
+  // Llamada entrante: es independiente de la revisión, así que se mira antes
+  // del corte de abajo.
+  const char* incomingFrom = document["incoming_call"]["from"] | "";
+  if (incomingFrom[0] != '\0') requestIncomingCall(incomingFrom);
 
   uint32_t revision = document["revision"] | 0u;
   if (!force && revision == settings.revision) return false;

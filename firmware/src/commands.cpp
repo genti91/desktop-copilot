@@ -35,6 +35,16 @@ void applyDeviceOutputs() {
   setDisplayPower(displayEnabled && !sleeping);
 }
 
+void setNotificationLed(uint8_t red, uint8_t green, uint8_t blue) {
+  rgbLed.setBrightness(150);
+  rgbLed.setPixelColor(0, rgbLed.Color(red, green, blue));
+  rgbLed.show();
+}
+
+void clearNotificationLed() {
+  applyLedOutputs();
+}
+
 void initDeviceOutputs() {
   pinMode(PIN_LED, OUTPUT);
   rgbLed.begin();

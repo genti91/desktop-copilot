@@ -22,3 +22,12 @@ bool videoCallPending();
 // Entra en modo llamada y no vuelve hasta que se corta (toque en el sensor, el
 // otro cuelga, nadie atiende, o se cae el Wi-Fi). Bloquea: corre en loop().
 void runVideoCall();
+
+// Llamada entrante: el backend avisa por /device/config que "from" está
+// llamando. settings.cpp lo pasa acá; loop() lo levanta con runIncomingCall().
+void requestIncomingCall(const String& from);
+bool incomingCallPending();
+
+// Muestra "<from> te está llamando", pone el LED rojo y espera un toque para
+// atender (hasta ~35 s). Si se atiende, encadena la videollamada. Bloquea.
+void runIncomingCall();

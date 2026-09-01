@@ -137,6 +137,9 @@ bool beginBackendRequest(HTTPClient& http, const String& url) {
 
   if (!http.begin(backendTransport(), url)) return false;
   if (device_token[0] != 0) http.addHeader("X-Device-Token", device_token);
+  // El backend lo usa para saber quién sondea (llamadas entrantes) y quién
+  // inicia una videollamada.
+  if (device_name[0] != 0) http.addHeader("X-Device-Name", device_name);
   return true;
 }
 

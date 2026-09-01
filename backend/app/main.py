@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from google.genai import types
 
@@ -91,12 +91,14 @@ def process_notes(payload: NotesPayload, background_tasks: BackgroundTasks):
 
 @app.post("/voice-assistant")
 async def voice_assistant(
+    request: Request,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     session_id: str = Form("esp32_session"),
 ):
     audio_bytes = await file.read()
     sessions.setdefault(session_id, [])
+    caller_name = (request.headers.get("X-Device-Name") or "").strip().lower()
 
     if gemini is None:
         # El ESP32 reproduce lo que le devuelvan, así que le contestamos hablando
@@ -181,7 +183,7 @@ async def voice_assistant(
             args = dict(llamada.args or {})
             try:
                 if llamada.name == CALL_TOOL:
-                    frase = aplicar_accion_llamada(args, pending_esp)
+                    frase = aplicar_accion_llamada(args, pending_esp, caller_name)
                 else:
                     frase = await asyncio.to_thread(
                         aplicar_accion_luz, llamada.name, args, pending_esp

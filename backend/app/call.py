@@ -12,12 +12,39 @@ caen en la misma sala sin que el backend sepa quién es quién.
 
 import asyncio
 import re
+import time
 
 from google.genai import types
 
 from .config import CALL_RELAY_HOST, CALL_RELAY_PORT
 
 CALL_TOOL = "iniciar_videollamada"
+
+# nombre del llamado -> (quién llama, timestamp). El ESP llamado lo ve en su
+# próximo sondeo de /device/config y hace sonar la llamada.
+_INCOMING_TTL_S = 40
+_incoming: dict[str, tuple[str, float]] = {}
+
+
+def note_incoming_call(target: str, caller: str) -> None:
+    if target and caller and target != caller:
+        _incoming[target] = (caller, time.monotonic())
+
+
+def incoming_call_for(device_name: str) -> str | None:
+    entry = _incoming.get(device_name) if device_name else None
+    if entry is None:
+        return None
+    caller, ts = entry
+    if time.monotonic() - ts > _INCOMING_TTL_S:
+        _incoming.pop(device_name, None)
+        return None
+    return caller
+
+
+def clear_incoming(*names: str) -> None:
+    for name in names:
+        _incoming.pop(name, None)
 
 _HANDSHAKE_TIMEOUT_S = 10
 # El primero que entra a la sala espera bastante: hacer los dos "llamá a ..."
@@ -110,6 +137,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
 
     # Segundo en la sala: empareja y hace de puente en los dos sentidos.
     print(f"📹 [{room}] {peer} emparejado; puente abierto.")
+    clear_incoming(*room.split("+"))  # ya se conectaron, no hace falta que suene
     p_reader, p_writer, p_llego, p_termino = partner
     if not p_llego.done():
         p_llego.set_result(True)
@@ -155,10 +183,12 @@ def call_declaration() -> types.FunctionDeclaration:
     )
 
 
-def aplicar_accion_llamada(args: dict, pending_esp: list[str]) -> str:
-    """Traduce la tool a un comando CALL:<persona> para la cabecera X-Action."""
+def aplicar_accion_llamada(args: dict, pending_esp: list[str], caller: str = "") -> str:
+    """Traduce la tool a un comando CALL:<persona> para la cabecera X-Action, y
+    deja anotado el llamado para que su ESP haga sonar la llamada."""
     persona = re.sub(r"[^a-z0-9-]", "", str(args.get("persona", "")).strip().lower())
     if not persona:
         return "no entendí a quién llamar"
     pending_esp.append(f"CALL:{persona}")
+    note_incoming_call(persona, re.sub(r"[^a-z0-9-]", "", caller.strip().lower()))
     return f"llamando a {persona}"

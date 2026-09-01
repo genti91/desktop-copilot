@@ -11,6 +11,7 @@
 
 #include "audio.h"
 #include "backend.h"
+#include "commands.h"
 #include "device_config.h"
 #include "display.h"
 #include "tailnet.h"
@@ -29,6 +30,10 @@ constexpr size_t MAX_JPEG_BYTES = 60 * 1024;         // un 240x240 q12 ronda 8 K
 constexpr uint32_t WAIT_PEER_MS = 180000;
 constexpr uint32_t MAX_CALL_MS = 10UL * 60 * 1000;
 constexpr uint32_t RX_STALL_MS = 8000;               // sin frames -> se cortó
+constexpr uint32_t RING_MS = 35000;                  // cuánto suena la entrante
+// Tras atender o rechazar, se ignora al mismo llamante este rato: el aviso del
+// backend sigue vivo unos segundos y el poll lo volvería a traer.
+constexpr uint32_t RING_COOLDOWN_MS = 50000;
 
 // Pines de la cámara del XIAO ESP32-S3 Sense. Son fijos: van por el conector B2B
 // de la placa de expansión, no por el header, así que no chocan con el display
@@ -65,6 +70,10 @@ camera_config_t cameraConfig() {
 
 volatile bool pendingCall = false;
 char pendingTarget[DEVICE_NAME_SIZE] = {0};
+volatile bool pendingIncoming = false;
+char pendingFrom[DEVICE_NAME_SIZE] = {0};
+char lastRingFrom[DEVICE_NAME_SIZE] = {0};
+uint32_t lastRingMs = 0;
 bool cameraUp = false;
 
 String buildRoom(const String& target) {
@@ -142,6 +151,68 @@ void requestVideoCall(const String& persona) {
 
 bool videoCallPending() {
   return pendingCall;
+}
+
+void requestIncomingCall(const String& from) {
+  String who = from;
+  who.trim();
+  if (who.length() == 0) return;
+  if (pendingCall || pendingIncoming) return;  // ya hay algo en curso
+  if (who.equalsIgnoreCase(lastRingFrom) && millis() - lastRingMs < RING_COOLDOWN_MS) return;
+  strlcpy(pendingFrom, who.c_str(), sizeof(pendingFrom));
+  pendingIncoming = true;
+  Serial.printf("📞 Llamada entrante de: %s\n", pendingFrom);
+}
+
+bool incomingCallPending() {
+  return pendingIncoming;
+}
+
+void runIncomingCall() {
+  pendingIncoming = false;
+  const String from = String(pendingFrom);
+  pendingFrom[0] = 0;
+  strlcpy(lastRingFrom, from.c_str(), sizeof(lastRingFrom));
+  lastRingMs = millis();
+
+  if (from.length() == 0 || String(device_name).length() == 0) return;
+
+  // Que termine cualquier respuesta de voz que esté sonando.
+  const uint32_t waitStart = millis();
+  while (mp3 != nullptr && mp3->isRunning() && millis() - waitStart < 6000) delay(50);
+
+  pauseWakeWord();
+  pauseFaceAnimation();
+  showMessage(from.c_str(), "te esta llamando", TFT_CYAN);
+  setNotificationLed(255, 0, 0);
+
+  bool answered = false;
+  const uint32_t ringStart = millis();
+  while (millis() - ringStart < RING_MS) {
+    if (digitalRead(TOUCH_PIN) == HIGH) {
+      delay(40);
+      if (digitalRead(TOUCH_PIN) == HIGH) {
+        while (digitalRead(TOUCH_PIN) == HIGH) delay(10);
+        answered = true;
+        break;
+      }
+    }
+    // Parpadeo lento para que se lea como "está sonando".
+    setNotificationLed(((millis() / 450) % 2) ? 255 : 25, 0, 0);
+    delay(20);
+  }
+
+  clearNotificationLed();
+  resumeFaceAnimation();
+  resumeWakeWord();
+
+  if (answered) {
+    Serial.println("📞 Atendida.");
+    requestVideoCall(from);  // loop() la levanta en la vuelta siguiente
+  } else {
+    Serial.println("📞 Llamada perdida.");
+    setFaceMode(FACE_IDLE);
+  }
 }
 
 void runVideoCall() {
