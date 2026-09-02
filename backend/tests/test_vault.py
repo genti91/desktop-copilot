@@ -148,6 +148,34 @@ def test_reconcile_indexes_new_and_drops_deleted(vault_dir, indexed):
     assert stored["ids"] == ["Acme/" + a.name]
 
 
+def test_reconcile_ignores_hidden_dirs_and_prunes_them(vault_dir, indexed):
+    real = vault.write_capture_note("Acme", "nota real")
+    # copia vieja tipo la que deja el versionado de Syncthing
+    stv = vault_dir / ".stversions" / "Acme"
+    stv.mkdir(parents=True)
+    (stv / "vieja~20260101.md").write_text("---\nproyecto: Acme\n---\n\nversion vieja", encoding="utf-8")
+
+    vault.reconcile()
+    stored = indexed.get()
+    assert stored["ids"] == ["Acme/" + real.name]  # la de .stversions no entra
+
+    # y si ya estuviera indexada de antes, reconcile la saca
+    indexed.add(ids=[".stversions/Acme/vieja~20260101.md"], embeddings=[[1.0, 0.0, 0.0]],
+                documents=["x"], metadatas=[{"source": "vault", "mtime": 0.0}])
+    vault.reconcile()
+    assert indexed.get()["ids"] == ["Acme/" + real.name]
+
+
+def test_meeting_filename_does_not_double_the_date(vault_dir):
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    project = ProjectSummary(
+        project_name="Acme", summary="", action_items=[], design_feedback=[]
+    )
+    path = vault.write_meeting_note(f"Reunión con el estudio — {today}", project)
+    assert path.name == f"{today} Reunión con el estudio.md"
+
+
 def test_reconcile_reindexes_edited_file(vault_dir, indexed):
     path = vault.write_capture_note("Acme", "texto viejo")
     vault.reconcile()

@@ -100,6 +100,20 @@ def _project_from_path(path: Path) -> str:
         return "General"
 
 
+def _is_hidden(path: Path, base: Path) -> bool:
+    """True si `path` cuelga de una carpeta oculta (.stversions, .obsidian, .trash…)."""
+    try:
+        rel = path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return False
+    return any(part.startswith(".") for part in rel.parts[:-1])
+
+
+def note_files(base: Path) -> list[Path]:
+    """Los .md reales bajo `base`, sin lo que vive en carpetas ocultas."""
+    return [path for path in base.rglob("*.md") if not _is_hidden(path, vault_root())]
+
+
 # --------------------------------------------------------------------------- #
 # Escritura
 # --------------------------------------------------------------------------- #
@@ -112,7 +126,11 @@ def _task_line(item: ActionItem) -> str:
 
 def write_meeting_note(meeting_title: str, project: ProjectSummary) -> Path:
     today = datetime.now().strftime("%Y-%m-%d")
-    path = _project_dir(project.project_name) / f"{today} {_clean_component(meeting_title, fallback='reunion')}.md"
+    # El modelo a veces mete la fecha en el título; no la repetimos en el nombre.
+    clean_title = re.sub(r"\s*[—–-]?\s*\d{4}-\d{2}-\d{2}\s*$", "", meeting_title).strip()
+    stem = _clean_component(clean_title, fallback="reunion")
+    prefix = "" if stem.startswith(today) else f"{today} "
+    path = _project_dir(project.project_name) / f"{prefix}{stem}.md"
 
     sections = [
         _dump_frontmatter(
@@ -177,7 +195,7 @@ def mark_completed(project_name: str, completed_tasks: list[str]) -> list[Path]:
 
     needles = [task.strip().lower() for task in completed_tasks if task.strip()]
     changed: list[Path] = []
-    for path in directory.rglob("*.md"):
+    for path in note_files(directory):
         original = path.read_text(encoding="utf-8")
         lines = original.splitlines(keepends=True)
         touched = False
@@ -212,7 +230,7 @@ def index_file(path: Path) -> None:
     if gemini is None:
         return
     path = Path(path)
-    if not path.is_file():
+    if not path.is_file() or _is_hidden(path, vault_root()):
         return
 
     text = path.read_text(encoding="utf-8")
@@ -249,7 +267,7 @@ def reconcile() -> None:
     if not root.is_dir():
         return
 
-    on_disk = {relative_id(path): path for path in root.rglob("*.md")}
+    on_disk = {relative_id(path): path for path in note_files(root)}
     stored = collection.get(where={"source": "vault"})
     stored_mtime = {
         doc_id: metadata.get("mtime", 0.0)
