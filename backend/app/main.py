@@ -3,18 +3,24 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from google.genai import types
 
 from .auth import install_auth
-from .config import APP_TITLE, FIRMWARE_AUTO_SYNC, MAX_HISTORY_MESSAGES
+from .call import CALL_TOOL, aplicar_accion_llamada, call_declaration, call_relay_server
+from .config import (
+    APP_TITLE,
+    CALL_RELAY_ENABLED,
+    FIRMWARE_AUTO_SYNC,
+    MAX_HISTORY_MESSAGES,
+)
 from .device import router as device_router
 from .integrations import collection, generate_speech_bytes, gemini, groq, voice_models
 from .lights import (
     aplicar_accion_luz,
-    build_light_tools,
     confirmacion_por_defecto,
+    light_declarations,
     tools_prompt,
 )
 from .models import MultiProjectResponse, NotesPayload, PersonalityPayload
@@ -26,11 +32,15 @@ from .state import sessions, state_memory
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Mientras el backend viva, va a buscar firmware nuevo a GitHub."""
-    sync_task = asyncio.create_task(background_sync_loop()) if FIRMWARE_AUTO_SYNC else None
+    """Tareas de fondo: espejado de firmware y el relay de videollamada."""
+    tasks = []
+    if FIRMWARE_AUTO_SYNC:
+        tasks.append(asyncio.create_task(background_sync_loop()))
+    if CALL_RELAY_ENABLED:
+        tasks.append(asyncio.create_task(call_relay_server()))
     yield
-    if sync_task:
-        sync_task.cancel()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(title=APP_TITLE, lifespan=lifespan)
@@ -81,12 +91,14 @@ def process_notes(payload: NotesPayload, background_tasks: BackgroundTasks):
 
 @app.post("/voice-assistant")
 async def voice_assistant(
+    request: Request,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     session_id: str = Form("esp32_session"),
 ):
     audio_bytes = await file.read()
     sessions.setdefault(session_id, [])
+    caller_name = (request.headers.get("X-Device-Name") or "").strip().lower()
 
     if gemini is None:
         # El ESP32 reproduce lo que le devuelvan, así que le contestamos hablando
@@ -118,6 +130,10 @@ async def voice_assistant(
 
     {tools_prompt()}
 
+    [VIDEOLLAMADA]
+    Si te piden llamar a alguien ("llamá a Franco", "videollamada con Jose"), usá
+    la función {CALL_TOOL} con el nombre en minúsculas. Avisá que estás llamando.
+
     [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
     Usa esta información para responder sus dudas sobre proyectos:
     {context_text}
@@ -131,7 +147,7 @@ async def voice_assistant(
     # haría el modo automático (para que el modelo reaccione al resultado) no
     # vale la pena: el control de luces es fire-and-forget.
     pending_esp: list[str] = []
-    light_tools = build_light_tools()
+    tools = [types.Tool(function_declarations=light_declarations() + [call_declaration()])]
     sin_auto_fc = types.AutomaticFunctionCallingConfig(disable=True)
 
     # Cualquier error pasa al siguiente modelo, sin distinguir el tipo: un 503 y
@@ -141,7 +157,7 @@ async def voice_assistant(
     response_text = "Perdón, tuve un problema procesando eso."
     for modelo, base_config in voice_models():
         configuracion = base_config.model_copy(
-            update={"tools": light_tools, "automatic_function_calling": sin_auto_fc}
+            update={"tools": tools, "automatic_function_calling": sin_auto_fc}
         )
         try:
             result = gemini.models.generate_content(
@@ -164,13 +180,17 @@ async def voice_assistant(
 
         fragmentos: list[str] = []
         for llamada in llamadas:
+            args = dict(llamada.args or {})
             try:
-                frase = await asyncio.to_thread(
-                    aplicar_accion_luz, llamada.name, dict(llamada.args or {}), pending_esp
-                )
+                if llamada.name == CALL_TOOL:
+                    frase = aplicar_accion_llamada(args, pending_esp, caller_name)
+                else:
+                    frase = await asyncio.to_thread(
+                        aplicar_accion_luz, llamada.name, args, pending_esp
+                    )
             except Exception as error:
-                print(f"[Luces] {llamada.name} falló ({type(error).__name__}: {error}).")
-                frase = "tuve un problema con las luces"
+                print(f"[Tool] {llamada.name} falló ({type(error).__name__}: {error}).")
+                frase = "tuve un problema con eso"
             if frase:
                 fragmentos.append(frase)
 

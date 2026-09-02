@@ -12,6 +12,7 @@
 #include "settings.h"
 #include "tailnet.h"
 #include "version.h"
+#include "videocall.h"
 #include "voice.h"
 #include "wakeword.h"
 
@@ -105,9 +106,12 @@ void setup() {
   // directo por su IP 100.x. Se usa una sola vez: despues las claves quedan en
   // NVS y el dispositivo se reconecta solo.
   WiFiManagerParameter customAuthKey("authkey", "Auth key de Tailscale (opcional)", tailnet_auth_key, TAILNET_AUTH_KEY_SIZE);
+  // Nombre de este equipo: se usa para armar la sala de la videollamada.
+  WiFiManagerParameter customDeviceName("name", "Nombre de este equipo (videollamadas)", device_name, DEVICE_NAME_SIZE);
   wifiManager.addParameter(&customServerUrl);
   wifiManager.addParameter(&customDeviceToken);
   wifiManager.addParameter(&customAuthKey);
+  wifiManager.addParameter(&customDeviceName);
 
   if (portalRequested) {
     Serial.println("🔧 Sensor tocado: abro el portal de configuracion.");
@@ -134,6 +138,7 @@ void setup() {
     strlcpy(server_url, customServerUrl.getValue(), sizeof(server_url));
     strlcpy(device_token, customDeviceToken.getValue(), sizeof(device_token));
     strlcpy(tailnet_auth_key, customAuthKey.getValue(), sizeof(tailnet_auth_key));
+    strlcpy(device_name, customDeviceName.getValue(), sizeof(device_name));
     saveBackendConfig();
   }
 
@@ -210,6 +215,18 @@ void loop() {
     normalizeRecording(porWakeWord);
     sendAudioAndPlayResponse(porWakeWord);
     wakeWordResume();
+  }
+
+  // Llamada entrante detectada en el último sondeo de /device/config.
+  if (incomingCallPending()) {
+    runIncomingCall();
+  }
+
+  // Una respuesta pudo traer "CALL:<persona>": la llamada bloquea, así que va
+  // acá y no en executeDeviceCommand(), que corre mientras se despacha el audio.
+  // Atender una entrante también deja una llamada pendiente por acá.
+  if (videoCallPending()) {
+    runVideoCall();
   }
 
   if (digitalRead(TOUCH_PIN) == HIGH) {

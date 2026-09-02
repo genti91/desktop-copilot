@@ -131,6 +131,29 @@ TUYA_LAMPS=[{"nombre":"velador","id":"...","key":"...","ip":"192.168.1.50","vers
 |---|---|---|
 | `TUYA_LAMPS` | `[]` | Lista JSON de lámparas Tuya (nombre, id, key, ip, version) |
 
+## Videollamada ESP↔ESP
+
+Dos XIAO ESP32-S3 Sense se ven la cámara mutuamente en el display, sin audio.
+
+- El modelo tiene la tool `iniciar_videollamada(persona)`. "Llamá a Franco" →
+  el backend devuelve `X-Action: CALL:franco` y el ESP entra en modo llamada.
+- Los dos tienen que iniciar la llamada: el ESP arma la sala como
+  `sorted(nombre_propio, destino)`, así "llamar a franco" desde el equipo de
+  jose y "llamar a jose" desde el de franco caen en la misma sala.
+- El backend levanta un **relay TCP** (`app/call.py`) en `CALL_RELAY_PORT` (8001)
+  dentro del mismo proceso que la API. No mira el contenido: los dos ESP se
+  conectan, mandan el nombre de la sala y el relay copia bytes de uno al otro.
+  El framing (largo + JPEG) lo maneja el firmware. Si un lado corta, cae la
+  llamada del otro.
+- Alcanza con que el puerto sea accesible desde el tailnet (entre peers está
+  abierto). En LAN pura hay que habilitarlo en el firewall del Pi.
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `CALL_RELAY_ENABLED` | `1` | `0` apaga el relay |
+| `CALL_RELAY_PORT` | `8001` | Puerto del relay |
+| `CALL_RELAY_HOST` | `0.0.0.0` | Interfaz donde escucha |
+
 ## Firmware automático
 
 Al levantar, el backend arranca una tarea que consulta los releases del repo cada

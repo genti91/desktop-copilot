@@ -46,6 +46,13 @@ TRUSTED_NETWORKS = os.getenv("TRUSTED_NETWORKS", "192.168.0.0/16,10.0.0.0/8,172.
 # Ej: TUYA_LAMPS=[{"nombre":"velador","id":"...","key":"...","ip":"192.168.1.50","version":"3.4"}]
 # Los valores salen de `python -m tinytuya wizard`. Sin esto no se registra
 # ninguna lámpara y la función Tuya no se le ofrece al modelo.
+# Relay TCP para la videollamada ESP↔ESP (sin audio). Los dos ESP se conectan a
+# este puerto —vía tailnet o LAN—, mandan el nombre de la sala y el relay copia
+# bytes de uno al otro. Corre en el mismo proceso que la API, en otro puerto.
+CALL_RELAY_HOST = os.getenv("CALL_RELAY_HOST", "0.0.0.0")
+CALL_RELAY_PORT = int(os.getenv("CALL_RELAY_PORT", "8001"))
+CALL_RELAY_ENABLED = os.getenv("CALL_RELAY_ENABLED", "1").lower() not in ("0", "false", "no")
+
 _tuya_lamps_raw = os.getenv("TUYA_LAMPS", "").strip()
 try:
     TUYA_LAMPS = json.loads(_tuya_lamps_raw) if _tuya_lamps_raw else []

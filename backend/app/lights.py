@@ -120,12 +120,17 @@ def _tuya_declaration(nombres: list[str]) -> types.FunctionDeclaration:
     )
 
 
-def build_light_tools() -> list[types.Tool]:
-    """Las tools para pasarle a generate_content. La de Tuya sólo si hay lámparas."""
+def light_declarations() -> list[types.FunctionDeclaration]:
+    """Las declaraciones de luces. La de Tuya sólo si hay lámparas configuradas."""
     declaraciones = [_esp_declaration()]
     if LAMP_NAMES:
         declaraciones.append(_tuya_declaration(LAMP_NAMES))
-    return [types.Tool(function_declarations=declaraciones)]
+    return declaraciones
+
+
+def build_light_tools() -> list[types.Tool]:
+    """Las tools para pasarle a generate_content. La de Tuya sólo si hay lámparas."""
+    return [types.Tool(function_declarations=light_declarations())]
 
 
 def tools_prompt() -> str:

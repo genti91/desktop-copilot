@@ -14,3 +14,8 @@ void setRgbBrightness(uint8_t brightness);
 void setFilamentEnabled(bool enabled);
 void setDisplayEnabled(bool enabled);
 void applyDeviceOutputs();
+
+// Override temporal del LED RGB para una notificación (llamada entrante). No
+// toca la configuración guardada; clearNotificationLed() vuelve a lo de antes.
+void setNotificationLed(uint8_t red, uint8_t green, uint8_t blue);
+void clearNotificationLed();

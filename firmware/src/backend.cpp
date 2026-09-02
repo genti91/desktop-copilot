@@ -11,6 +11,9 @@ char server_url[SERVER_URL_SIZE] = "http://octopi:8000/voice-assistant";
 // sobrevive a los flasheos porque LittleFS no se borra al subir firmware.
 // Lo mismo vale para la auth key del tailnet, que vive en tailnet.cpp.
 char device_token[DEVICE_TOKEN_SIZE] = "";
+// Vacio por defecto: sin nombre no se pueden hacer videollamadas, pero todo lo
+// demas anda igual. Se completa una vez desde el portal.
+char device_name[DEVICE_NAME_SIZE] = "";
 
 namespace {
 
@@ -94,6 +97,10 @@ String backendVoiceUrl() {
   return backendBaseUrl() + backendPath();
 }
 
+String backendConnectHost() {
+  return connectHost();
+}
+
 WiFiClient& backendTransport() {
   plainClient.stop();
   return plainClient;
@@ -130,6 +137,9 @@ bool beginBackendRequest(HTTPClient& http, const String& url) {
 
   if (!http.begin(backendTransport(), url)) return false;
   if (device_token[0] != 0) http.addHeader("X-Device-Token", device_token);
+  // El backend lo usa para saber quién sondea (llamadas entrantes) y quién
+  // inicia una videollamada.
+  if (device_name[0] != 0) http.addHeader("X-Device-Name", device_name);
   return true;
 }
 
@@ -156,6 +166,13 @@ void loadBackendConfig() {
   strlcpy(tailnet_auth_key, loadedAuthKey.c_str(), sizeof(tailnet_auth_key));
   if (tailnet_auth_key[0] != 0) Serial.println("Auth key del tailnet cargada desde flash.");
 
+  // 4ta linea: agregada con la videollamada. Los /config.txt viejos no la traen
+  // y readStringUntil devuelve "" sin romper nada.
+  String loadedName = configFile.readStringUntil('\n');
+  loadedName.trim();
+  strlcpy(device_name, loadedName.c_str(), sizeof(device_name));
+  if (device_name[0] != 0) Serial.printf("Nombre del equipo: %s\n", device_name);
+
   configFile.close();
 }
 
@@ -168,6 +185,7 @@ void saveBackendConfig() {
   configFile.println(server_url);
   configFile.println(device_token);
   configFile.println(tailnet_auth_key);
+  configFile.println(device_name);
   configFile.close();
   Serial.println("Configuracion del backend guardada en LittleFS.");
 }

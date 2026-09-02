@@ -12,10 +12,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
 
+from .call import incoming_call_for
 from .config import BASE_DIR
 from .models import DeviceConfig, DeviceConfigUpdate, DeviceImage, FirmwareManifest
 
@@ -222,7 +223,7 @@ def _color_channels(hex_color: str) -> tuple[int, int, int]:
     return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
 
 
-def device_state_payload(config: DeviceConfig) -> dict:
+def device_state_payload(config: DeviceConfig, incoming_from: Optional[str] = None) -> dict:
     """Vista compacta que consume el ESP32 en cada poll."""
     red, green, blue = _color_channels(config.rgb_color)
     image = None
@@ -233,7 +234,7 @@ def device_state_payload(config: DeviceConfig) -> dict:
             "bytes": RAW_IMAGE_BYTES,
             "url": "/device/image",
         }
-    return {
+    payload = {
         "revision": config.revision,
         "rgb": {
             "enabled": config.rgb_enabled,
@@ -246,11 +247,15 @@ def device_state_payload(config: DeviceConfig) -> dict:
         "display": {"enabled": config.display_enabled},
         "image": image,
     }
+    if incoming_from:
+        payload["incoming_call"] = {"from": incoming_from}
+    return payload
 
 
 @router.get("/device/config")
-def get_device_config():
-    return device_state_payload(load_config())
+def get_device_config(request: Request):
+    device_name = (request.headers.get("X-Device-Name") or "").strip().lower()
+    return device_state_payload(load_config(), incoming_call_for(device_name))
 
 
 @router.get("/device/config/full", response_model=DeviceConfig)

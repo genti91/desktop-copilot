@@ -1,0 +1,194 @@
+"""Videollamada ESP↔ESP sin audio: relay TCP + la tool que la dispara.
+
+El relay no mira el contenido. Cada ESP abre un socket, manda una línea con el
+nombre de la sala (`\\n` al final) y a partir de ahí el relay copia todo lo que
+llega de un lado al otro. El framing —largo de 4 bytes + JPEG— lo maneja el
+firmware.
+
+La sala la arma cada ESP como ``sorted(nombre_propio, destino)`` unida por "+":
+"llamar a franco" desde el ESP de jose y "llamar a jose" desde el de franco
+caen en la misma sala sin que el backend sepa quién es quién.
+"""
+
+import asyncio
+import re
+import time
+
+from google.genai import types
+
+from .config import CALL_RELAY_HOST, CALL_RELAY_PORT
+
+CALL_TOOL = "iniciar_videollamada"
+
+# nombre del llamado -> (quién llama, timestamp). El ESP llamado lo ve en su
+# próximo sondeo de /device/config y hace sonar la llamada.
+_INCOMING_TTL_S = 40
+_incoming: dict[str, tuple[str, float]] = {}
+
+
+def note_incoming_call(target: str, caller: str) -> None:
+    if target and caller and target != caller:
+        _incoming[target] = (caller, time.monotonic())
+
+
+def incoming_call_for(device_name: str) -> str | None:
+    entry = _incoming.get(device_name) if device_name else None
+    if entry is None:
+        return None
+    caller, ts = entry
+    if time.monotonic() - ts > _INCOMING_TTL_S:
+        _incoming.pop(device_name, None)
+        return None
+    return caller
+
+
+def clear_incoming(*names: str) -> None:
+    for name in names:
+        _incoming.pop(name, None)
+
+_HANDSHAKE_TIMEOUT_S = 10
+# El primero que entra a la sala espera bastante: hacer los dos "llamá a ..."
+# de voz seguidos (grabar + STT + modelo + TTS x2) tarda fácil más de un minuto.
+_PAIR_WAIT_TIMEOUT_S = 240
+_ROOM_MAX_LEN = 80
+_CHUNK = 8192
+
+# sala -> (reader, writer, partner_llego: Future, puente_termino: Event)
+_waiting: dict[str, tuple] = {}
+
+
+# --------------------------------------------------------------------------- #
+# Relay
+# --------------------------------------------------------------------------- #
+
+
+def _shut(writer: asyncio.StreamWriter) -> None:
+    try:
+        writer.close()
+    except OSError:
+        pass
+
+
+async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+    try:
+        while True:
+            chunk = await src.read(_CHUNK)
+            if not chunk:
+                break
+            dst.write(chunk)
+            await dst.drain()
+    except (OSError, asyncio.CancelledError):
+        pass
+
+
+async def _bridge(
+    a_reader: asyncio.StreamReader,
+    a_writer: asyncio.StreamWriter,
+    b_reader: asyncio.StreamReader,
+    b_writer: asyncio.StreamWriter,
+) -> None:
+    """Copia bytes en los dos sentidos. En cuanto un lado corta, cae la llamada."""
+    tasks = [
+        asyncio.create_task(_pipe(a_reader, b_writer)),
+        asyncio.create_task(_pipe(b_reader, a_writer)),
+    ]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        _shut(a_writer)
+        _shut(b_writer)
+
+
+async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        raw = await asyncio.wait_for(reader.readline(), _HANDSHAKE_TIMEOUT_S)
+    except (asyncio.TimeoutError, OSError):
+        _shut(writer)
+        return
+
+    peer = writer.get_extra_info("peername")
+    room = raw.decode("utf-8", "replace").strip()[:_ROOM_MAX_LEN]
+    if not room:
+        print(f"📹 {peer} conectó sin nombre de sala; lo cierro.")
+        _shut(writer)
+        return
+
+    partner = _waiting.pop(room, None)
+
+    if partner is None:
+        # Primero en la sala: queda esperando al segundo.
+        print(f"📹 [{room}] {peer} espera compañero ({_PAIR_WAIT_TIMEOUT_S}s)…")
+        llego = asyncio.get_event_loop().create_future()
+        termino = asyncio.Event()
+        _waiting[room] = (reader, writer, llego, termino)
+        try:
+            await asyncio.wait_for(llego, _PAIR_WAIT_TIMEOUT_S)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            print(f"📹 [{room}] nadie más llegó; cierro a {peer}.")
+            _waiting.pop(room, None)
+            _shut(writer)
+            return
+        # El segundo maneja el puente; acá sólo se espera a que termine.
+        await termino.wait()
+        _shut(writer)
+        return
+
+    # Segundo en la sala: empareja y hace de puente en los dos sentidos.
+    print(f"📹 [{room}] {peer} emparejado; puente abierto.")
+    clear_incoming(*room.split("+"))  # ya se conectaron, no hace falta que suene
+    p_reader, p_writer, p_llego, p_termino = partner
+    if not p_llego.done():
+        p_llego.set_result(True)
+    try:
+        await _bridge(p_reader, p_writer, reader, writer)
+    finally:
+        p_termino.set()
+        print(f"📹 [{room}] puente cerrado.")
+
+
+async def call_relay_server() -> None:
+    """Servidor del relay. Se lanza desde el lifespan de la app."""
+    server = await asyncio.start_server(_handle, CALL_RELAY_HOST, CALL_RELAY_PORT)
+    addr = ", ".join(str(s.getsockname()) for s in server.sockets)
+    print(f"📹 Relay de videollamada escuchando en {addr}")
+    async with server:
+        await server.serve_forever()
+
+
+# --------------------------------------------------------------------------- #
+# Tool
+# --------------------------------------------------------------------------- #
+
+
+def call_declaration() -> types.FunctionDeclaration:
+    return types.FunctionDeclaration(
+        name=CALL_TOOL,
+        description=(
+            "Inicia una videollamada sin audio con otra persona. La otra persona "
+            "tiene que iniciar la llamada de su lado también para que se conecte. "
+            "El sensor táctil corta la llamada."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            required=["persona"],
+            properties={
+                "persona": types.Schema(
+                    type=types.Type.STRING,
+                    description="Nombre de la persona a llamar, en minúsculas. Ej: 'franco', 'jose'.",
+                ),
+            },
+        ),
+    )
+
+
+def aplicar_accion_llamada(args: dict, pending_esp: list[str], caller: str = "") -> str:
+    """Traduce la tool a un comando CALL:<persona> para la cabecera X-Action, y
+    deja anotado el llamado para que su ESP haga sonar la llamada."""
+    persona = re.sub(r"[^a-z0-9-]", "", str(args.get("persona", "")).strip().lower())
+    if not persona:
+        return "no entendí a quién llamar"
+    pending_esp.append(f"CALL:{persona}")
+    note_incoming_call(persona, re.sub(r"[^a-z0-9-]", "", caller.strip().lower()))
+    return f"llamando a {persona}"

@@ -41,6 +41,7 @@ def run_without_ai_keys(script: str) -> subprocess.CompletedProcess:
         "NOTION_API_KEY": "",
         "PANEL_PASSWORD": "",
         "FIRMWARE_AUTO_SYNC": "0",
+        "CALL_RELAY_ENABLED": "0",
     }
     return subprocess.run(
         [sys.executable, "-c", script],
