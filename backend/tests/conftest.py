@@ -1,6 +1,6 @@
 """Fixtures para los tests del router de dispositivo.
 
-El router de `app.device` no toca Gemini/Groq/Notion, así que se monta en una app
+El router de `app.device` no toca Gemini/Groq, así que se monta en una app
 mínima: los tests corren sin claves de API ni base vectorial.
 """
 

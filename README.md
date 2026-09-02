@@ -21,8 +21,8 @@ Proyecto pensado para uso diario de trabajo: capturas notas, las dejas indexadas
 - Backend FastAPI para:
   - Procesar notas de reuniones (`/process-notes`).
   - Recibir audio del ESP32 y responder con audio (`/voice-assistant`).
-  - Recuperar contexto desde ChromaDB (RAG) para responder preguntas.
-  - Guardar tareas/notas en Notion.
+  - Recuperar contexto desde el vector store (RAG) para responder preguntas.
+  - Guardar notas y tareas como `.md` en un vault de Obsidian.
   - Servir la configuracion del dispositivo (`/device`), las imagenes de pantalla y el firmware OTA.
 - Firmware para ESP32-S3 (Seeed XIAO ESP32S3) que:
   - Se conecta por Wi-Fi (WiFiManager + portal cautivo).
@@ -59,7 +59,7 @@ ESP32 (mic + speaker + LEDs)
   -> envia WAV por HTTP multipart, dentro del tunel WireGuard del tailnet
 FastAPI (/voice-assistant)
   -> STT (Groq Whisper)
-  -> RAG (Gemini Embeddings + ChromaDB)
+  -> RAG (Gemini Embeddings + vector store SQLite, indice del vault de Obsidian)
   -> respuesta IA (Gemini)
   -> TTS (edge-tts)
 ESP32
@@ -78,8 +78,7 @@ desktop-copilot/
 |  |- app/
 |  |  |- assets/default_images/  # PNG 240x240 extraidos del PDF
 |  |  \- templates/              # layout.html + una plantilla por seccion
-|  |- chroma_db/
-|  |- data/               # config del dispositivo + firmware OTA (no versionado)
+|  |- data/               # vault de Obsidian, indice RAG, config del dispositivo, firmware OTA (no versionado)
 |  |- scripts/
 |  |- tests/
 |  |- requirements.txt
@@ -97,7 +96,7 @@ desktop-copilot/
 - Python 3.10+
 - API key de Gemini (obligatoria)
 - API key de Groq (recomendada para STT)
-- Notion API + Database ID
+- Obsidian (opcional, para ver y editar el vault de notas)
 
 ### Firmware
 
@@ -129,9 +128,7 @@ Completa `backend/.env`:
 ```env
 GEMINI_API_KEY=
 GROQ_API_KEY=
-NOTION_API_KEY=
-NOTION_DATABASE_ID=
-# CHROMA_PATH=./chroma_db
+# OBSIDIAN_VAULT_PATH=./data/vault
 ```
 
 Levantar servidor:
@@ -178,7 +175,7 @@ En el primer arranque:
 
 - `POST /process-notes`
   - Body JSON: `{"notes_text": "..."}`
-  - Extrae proyectos, resumen, tareas, feedback y lo guarda (RAG/Notion).
+  - Extrae proyectos, resumen, tareas, feedback y lo guarda (vault de Obsidian + RAG).
 - `POST /voice-assistant`
   - Multipart con `file` (audio) y `session_id`.
   - Devuelve `audio/mpeg` + header `X-Action` para hardware.

@@ -1,16 +1,9 @@
 from datetime import datetime
-import uuid
 
 from google.genai import types
 
-from .integrations import (
-    collection,
-    gemini,
-    mark_rag_tasks_as_completed,
-    mark_tasks_as_completed,
-    save_project_to_rag,
-    send_to_notion,
-)
+from . import vault
+from .integrations import gemini
 from .models import ProjectSummary, VoiceProcessingResult
 from .state import state_memory
 
@@ -22,8 +15,8 @@ def extract_and_save_data(user_text: str, default_project: str):
         today = datetime.now().strftime("%d/%m/%Y")
         prompt = f"""
         Analiza la frase dictada por el usuario y extrae cualquier tarea, feedback o nota relevante para el proyecto '{default_project}'.
-        
-        DATO IMPORTANTE: Hoy es {today}. 
+
+        DATO IMPORTANTE: Hoy es {today}.
         Para las tareas extraídas, el campo 'due_date' DEBE estar obligatoriamente en formato ISO 8601 (YYYY-MM-DD). Calcula la fecha matemáticamente usando la fecha de hoy como referencia.
         Si el usuario NO especifica una fecha de entrega, deja el 'due_date' completamente vacío (string vacío ""). NUNCA escribas "No especificado" ni ninguna otra palabra.
         """
@@ -38,30 +31,18 @@ def extract_and_save_data(user_text: str, default_project: str):
         parsed: VoiceProcessingResult = result.parsed
 
         if parsed.completed_tasks:
-            mark_tasks_as_completed(parsed.project_name, parsed.completed_tasks)
-            mark_rag_tasks_as_completed(parsed.project_name, parsed.completed_tasks)
+            for path in vault.mark_completed(parsed.project_name, parsed.completed_tasks):
+                vault.index_file(path)
 
         if parsed.action_items or parsed.design_feedback or parsed.general_notes:
-            document = f"Dictado/Nota [{parsed.project_name}]: {user_text}"
-            embedding = gemini.models.embed_content(model="gemini-embedding-2", contents=document)
-            collection.add(
-                ids=[str(uuid.uuid4())],
-                embeddings=[embedding.embeddings[0].values],
-                documents=[document],
-                metadatas=[
-                    {
-                        "project": parsed.project_name,
-                        "is_general": parsed.is_general_reminder,
-                        "status": "pending",
-                        "created_at": datetime.now().isoformat(),
-                    }
-                ],
-            )
-            send_to_notion(
-                project_name=parsed.project_name,
-                action_items=parsed.action_items,
-                design_feedback=parsed.design_feedback,
-                general_notes=parsed.general_notes,
+            vault.index_file(
+                vault.write_capture_note(
+                    parsed.project_name,
+                    user_text,
+                    parsed.action_items,
+                    parsed.design_feedback,
+                    parsed.general_notes,
+                )
             )
             if not parsed.is_general_reminder:
                 state_memory["last_project_name"] = parsed.project_name
@@ -72,16 +53,7 @@ def extract_and_save_data(user_text: str, default_project: str):
 def process_meeting_storage(meeting_title: str, projects: list[ProjectSummary]):
     try:
         for project in projects:
-            save_project_to_rag(meeting_title, project)
-            page_id = send_to_notion(
-                project_name=project.project_name,
-                action_items=project.action_items,
-                design_feedback=project.design_feedback,
-                summary=project.summary,
-                meeting_title=meeting_title,
-            )
-            if page_id:
-                state_memory["last_notion_page_ids"][project.project_name] = page_id
+            vault.index_file(vault.write_meeting_note(meeting_title, project))
             state_memory["last_project_name"] = project.project_name
     except Exception as error:
         print(f"[Background Meeting Save Error]: {error}")

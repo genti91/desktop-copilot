@@ -14,6 +14,7 @@ from .config import (
     CALL_RELAY_ENABLED,
     FIRMWARE_AUTO_SYNC,
     MAX_HISTORY_MESSAGES,
+    VAULT_WATCH_ENABLED,
 )
 from .device import router as device_router
 from .integrations import collection, generate_speech_bytes, gemini, groq, voice_models
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(background_sync_loop()))
     if CALL_RELAY_ENABLED:
         tasks.append(asyncio.create_task(call_relay_server()))
+    if VAULT_WATCH_ENABLED:
+        from .vault import watch_loop
+
+        tasks.append(asyncio.create_task(watch_loop()))
     yield
     for task in tasks:
         task.cancel()

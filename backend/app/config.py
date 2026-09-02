@@ -15,8 +15,16 @@ VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", str(BASE_DIR / "data" / "memo
 CHROMA_PATH = os.getenv("CHROMA_PATH", str(BASE_DIR / "chroma_db"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+
+# Las notas son archivos .md en un vault de Obsidian, que es la única fuente de
+# verdad: el vector store (RAG) se reconstruye a partir de ellos y lo que editás
+# en Obsidian se reindexa solo.
+OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", str(BASE_DIR / "data" / "vault"))
+# El watcher reindexa los .md que cambian por fuera del backend (los que tocás
+# en Obsidian). Es un poll simple, sin dependencias nuevas; lo que escribe el
+# propio backend se indexa al instante y no espera a esto.
+VAULT_WATCH_ENABLED = os.getenv("VAULT_WATCH_ENABLED", "1").lower() not in ("0", "false", "no")
+VAULT_WATCH_INTERVAL_SECONDS = int(os.getenv("VAULT_WATCH_INTERVAL_SECONDS", "5"))
 MAX_HISTORY_MESSAGES = 8
 SESSION_TTL_SECONDS = 1800
 

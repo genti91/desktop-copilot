@@ -146,6 +146,17 @@ def test_updating_a_missing_id_is_a_noop(collection):
     assert collection.count() == 0
 
 
+def test_delete_removes_only_the_given_ids(collection):
+    add(collection, "a", [1.0, 0.0], "una", project="X")
+    add(collection, "b", [0.0, 1.0], "otra", project="X")
+
+    collection.delete(["a", "no-existe"])
+
+    assert collection.get()["ids"] == ["b"]
+    collection.delete([])  # lista vacía: no explota
+    assert collection.count() == 1
+
+
 def test_accents_and_unicode_round_trip(collection):
     add(collection, "a", [1.0, 0.0], "Diseño de la campaña ñandú", project="Ñoño")
     results = collection.get()

@@ -3,7 +3,6 @@ fastapi
 google-genai
 groq
 httpx
-notion-client
 pillow
 python-dotenv
 python-multipart

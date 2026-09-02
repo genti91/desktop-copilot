@@ -1,6 +1,6 @@
 # Desktop Co-Pilot Backend
 
-API FastAPI para procesar notas de reuniones, consultar memoria RAG, guardar tareas en Notion, responder por voz y controlar el ESP32 (luces, imagen de pantalla y actualizaciones OTA).
+API FastAPI para procesar notas de reuniones, guardarlas en un vault de Obsidian, consultar memoria RAG, responder por voz y controlar el ESP32 (luces, imagen de pantalla y actualizaciones OTA).
 
 ## Estructura
 
@@ -13,15 +13,15 @@ backend/
 │   ├── device.py          # Config del dispositivo, imágenes y OTA
 │   ├── ota_sync.py        # Espejado del firmware desde releases de GitHub
 │   ├── pages.py           # Layout, navegación y páginas del panel
-│   ├── integrations.py    # Gemini, Groq, Notion y TTS
+│   ├── integrations.py    # Gemini, Groq y TTS
 │   ├── lights.py          # Tools de luces: LEDs del ESP32 y lámparas Tuya
+│   ├── vault.py           # Notas como .md en un vault de Obsidian + watcher del índice
 │   ├── vectorstore.py     # Memoria consultable (RAG) sobre SQLite
 │   ├── main.py            # Aplicación y endpoints HTTP
 │   ├── models.py          # Schemas Pydantic
 │   ├── services.py        # Procesamiento en segundo plano
 │   └── templates/         # layout.html + una plantilla por sección
-├── chroma_db/             # Base vieja de ChromaDB (migrable, ya no se usa)
-├── data/                  # Estado del dispositivo y firmware OTA (no versionado)
+├── data/                  # Vault de Obsidian, índice RAG, estado del dispositivo y firmware (no versionado)
 ├── scripts/               # Utilidades (extracción de imágenes del PDF)
 ├── tests/                 # Tests de páginas, dispositivo y sync de firmware
 ├── .env                  # Secretos locales, no versionar
@@ -50,6 +50,34 @@ barra de navegación compartida:
 | `/firmware` | Publicar firmware para OTA |
 
 `/dashboard` sigue funcionando y redirige a `/notes`.
+
+## Almacenamiento de notas
+
+Cada nota o reunión es un archivo `.md` con frontmatter dentro de
+`OBSIDIAN_VAULT_PATH` (`data/vault/` por defecto), en una carpeta por proyecto.
+El vault es la **única fuente de verdad**: el vector store (`data/memory.sqlite3`)
+es un índice derivado que se reconstruye leyendo los `.md`.
+
+- Lo que escribe el backend (`/process-notes`, dictado por voz) se indexa al
+  instante.
+- Lo que editás en Obsidian lo levanta un watcher (`app/vault.py`): un poll cada
+  `VAULT_WATCH_INTERVAL_SECONDS` (5 s), sin dependencias nuevas, que reindexa lo
+  cambiado y saca del índice lo borrado.
+- Las tareas son checkboxes `- [ ]`; marcarlas completas (a mano o por voz) las
+  pasa a `- [x]` y reindexa.
+- El id de cada documento en el índice es la ruta relativa del `.md`, así que
+  reindexar hace *upsert* y no acumula duplicados.
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `OBSIDIAN_VAULT_PATH` | `./data/vault` | Carpeta del vault |
+| `VAULT_WATCH_ENABLED` | `1` | `0` apaga el reindexado de ediciones externas |
+| `VAULT_WATCH_INTERVAL_SECONDS` | `5` | Cada cuánto revisa el vault |
+
+Para verlo y editarlo, abrí `OBSIDIAN_VAULT_PATH` como vault en Obsidian. Si el
+backend corre en otra máquina (la Raspberry Pi) y querés editar desde tu compu,
+apuntá `OBSIDIAN_VAULT_PATH` a una carpeta sincronizada (Obsidian Sync, git,
+Syncthing, un share de red…) y que Obsidian abra esa misma carpeta.
 
 ## Autenticación
 
@@ -99,6 +127,8 @@ para rasterizar; Pillow ya viene con las dependencias del backend.
 
 Todo lo configurable vive en `data/` y sobrevive reinicios del backend:
 
+- `data/vault/` — el vault de Obsidian: una carpeta por proyecto con las notas `.md`.
+- `data/memory.sqlite3` — índice RAG. Es derivado: se puede borrar y se rearma del vault.
 - `data/device_config.json` — colores, encendidos e imagen elegida (con `revision`).
 - `data/images/` — imágenes subidas desde la web, normalizadas a 240x240 PNG.
 - `data/firmware/firmware.bin` + `manifest.json` — firmware publicado para OTA.

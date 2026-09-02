@@ -38,10 +38,10 @@ def run_without_ai_keys(script: str) -> subprocess.CompletedProcess:
         "PYTHONIOENCODING": "utf-8",
         "GEMINI_API_KEY": "",
         "GROQ_API_KEY": "",
-        "NOTION_API_KEY": "",
         "PANEL_PASSWORD": "",
         "FIRMWARE_AUTO_SYNC": "0",
         "CALL_RELAY_ENABLED": "0",
+        "VAULT_WATCH_ENABLED": "0",
     }
     return subprocess.run(
         [sys.executable, "-c", script],

@@ -139,6 +139,14 @@ class Collection:
                 ],
             )
 
+    def delete(self, ids: list[str]) -> None:
+        if not ids:
+            return
+        with self._lock, self._connect() as connection:
+            connection.executemany(
+                "DELETE FROM documents WHERE id = ?", [(document_id,) for document_id in ids]
+            )
+
     def count(self) -> int:
         with self._connect() as connection:
             return connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]

@@ -3,7 +3,8 @@
         <h2>Subir notas de reunión</h2>
         <p>
             El asistente separa el texto por proyecto o cliente, extrae tareas con fecha de
-            entrega y feedback visual, lo indexa para consultarlo por voz y lo manda a Notion.
+            entrega y feedback visual, lo guarda como nota en tu vault de Obsidian y lo indexa
+            para consultarlo por voz.
         </p>
     </div>
     <div class="field">
@@ -61,7 +62,7 @@
             return;
         }
         processButton.disabled = true;
-        setStatus(notesStatus, 'Procesando notas, indexando y enviando a Notion…');
+        setStatus(notesStatus, 'Procesando notas, guardando en el vault e indexando…');
         try {
             const response = await fetch('/process-notes', {
                 method: 'POST',
