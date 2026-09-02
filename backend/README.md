@@ -53,13 +53,19 @@ barra de navegación compartida:
 
 ## Almacenamiento de notas
 
-Cada nota o reunión es un archivo `.md` con frontmatter dentro de
-`OBSIDIAN_VAULT_PATH` (`data/vault/` por defecto), en una carpeta por proyecto.
-El vault es la **única fuente de verdad**: el vector store (`data/memory.sqlite3`)
-es un índice derivado que se reconstruye leyendo los `.md`.
+Cada proyecto es una carpeta dentro de `OBSIDIAN_VAULT_PATH` (`data/vault/` por
+defecto). El vault es la **única fuente de verdad**: el vector store
+(`data/memory.sqlite3`) es un índice derivado que se reconstruye leyendo los `.md`.
 
-- Lo que escribe el backend (`/process-notes`, dictado por voz) se indexa al
-  instante.
+- **Reuniones** (`/process-notes`): un `.md` por proyecto y reunión, con
+  `## Resumen`, `## Tareas` y `## Feedback`.
+- **Capturas sueltas** (dictado por voz, notas cortas): se acumulan en un único
+  `Capturas.md` por proyecto —no un archivo nuevo cada vez—.
+- **Resolución de proyecto**: antes de crear una carpeta, se busca una parecida.
+  "La Espiga", "la spiga" o "Panadería La Espiga" caen todas en la misma; sólo si
+  no se parece a ninguna existente se crea una nueva (`resolve_project` en
+  `app/vault.py`, umbral `PROJECT_MATCH_THRESHOLD`).
+- Lo que escribe el backend se indexa al instante.
 - Lo que editás en Obsidian lo levanta un watcher (`app/vault.py`): un poll cada
   `VAULT_WATCH_INTERVAL_SECONDS` (5 s), sin dependencias nuevas, que reindexa lo
   cambiado y saca del índice lo borrado.

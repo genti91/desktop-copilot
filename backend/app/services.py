@@ -36,7 +36,7 @@ def extract_and_save_data(user_text: str, default_project: str):
 
         if parsed.action_items or parsed.design_feedback or parsed.general_notes:
             vault.index_file(
-                vault.write_capture_note(
+                vault.add_capture(
                     parsed.project_name,
                     user_text,
                     parsed.action_items,
