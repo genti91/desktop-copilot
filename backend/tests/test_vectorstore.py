@@ -108,8 +108,8 @@ def test_get_filters_by_field(collection):
     assert results["metadatas"] == [{"project": "Acme"}]
 
 
-def test_query_excludes_completed_tasks(collection):
-    """Es el filtro real de _retrieve_context: {"status": {"$ne": "completed"}}."""
+def test_query_can_exclude_by_metadata(collection):
+    """El almacén soporta filtros `$ne` sobre metadata (no lo usa el backend hoy)."""
     add(collection, "pendiente", [1.0, 0.0], "sigue abierta", status="pending")
     add(collection, "hecha", [1.0, 0.0], "ya se hizo", status="completed")
 

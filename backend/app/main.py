@@ -140,7 +140,9 @@ async def voice_assistant(
     la función {CALL_TOOL} con el nombre en minúsculas. Avisá que estás llamando.
 
     [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
-    Usa esta información para responder sus dudas sobre proyectos:
+    Usa esta información para responder sus dudas sobre proyectos. En las tareas,
+    "- [x]" es una tarea ya hecha y "- []" una pendiente; si están todas en "- [x]"
+    ese proyecto no tiene nada pendiente.
     {context_text}
     """
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
@@ -237,10 +239,12 @@ def _retrieve_context(user_text: str) -> str:
         return "No hay datos relevantes en la base."
     try:
         embedding = gemini.models.embed_content(model="gemini-embedding-2", contents=user_text)
+        # Sin filtrar por estado: las notas traen los checkboxes `- [x]` / `- [ ]`,
+        # así el modelo distingue lo hecho de lo pendiente y además puede responder
+        # sobre resúmenes y feedback de proyectos ya terminados.
         results = collection.query(
             query_embeddings=[embedding.embeddings[0].values],
-            where={"status": {"$ne": "completed"}},
-            n_results=2,
+            n_results=3,
         )
         documents = results.get("documents", [[]])[0]
         return "\n---\n".join(documents) if documents else "No hay datos relevantes en la base."
