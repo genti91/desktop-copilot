@@ -84,7 +84,7 @@ def test_personality_page_loads_the_profile_by_fetch(client):
     assert "/device/config/full?device=" in body
     assert "/update-personality" in body
     assert 'id="ragEnabled"' in body
-    assert 'id="tuyaEnabled"' in body
+    assert 'id="lampsEnabled"' in body
     assert "window.copilotDevice()" in body
 
 

@@ -62,19 +62,12 @@ DEVICE_NAMES = _device_list(os.getenv("DEVICE_NAMES", "franco,josefina"))
 # el valor inicial del perfil; después se cambia desde /personality.
 RAG_DISABLED_DEVICES = _device_list(os.getenv("RAG_DISABLED_DEVICES", "franco"))
 
-# Equipos cuyo asistente de voz puede controlar las lámparas Tuya de la
-# habitación (lista blanca). Los demás siguen manejando sólo sus propias luces.
-# Es sólo el valor inicial del perfil; después se cambia desde /personality.
-TUYA_DEVICES = _device_list(os.getenv("TUYA_DEVICES", "franco"))
+# Equipos cuyo asistente de voz arranca pudiendo controlar las lámparas de la
+# habitación (Tuya o WiZ). Vacío = todos. Es sólo el valor inicial del perfil;
+# después se cambia desde /personality, y cada lámpara además puede limitarse a
+# ciertos equipos con su campo "equipos".
+LAMP_DEVICES = _device_list(os.getenv("LAMP_DEVICES", ""))
 
-# Lámparas Tuya de la habitación, controladas por LAN con tinytuya. El asistente
-# de voz las prende/apaga y les cambia el color por function calling.
-#
-# Formato: una lista JSON en la variable de entorno, un objeto por lámpara con
-#   nombre, id, key, ip y (opcional) version del protocolo local.
-# Ej: TUYA_LAMPS=[{"nombre":"velador","id":"...","key":"...","ip":"192.168.1.50","version":"3.4"}]
-# Los valores salen de `python -m tinytuya wizard`. Sin esto no se registra
-# ninguna lámpara y la función Tuya no se le ofrece al modelo.
 # Relay TCP para la videollamada ESP↔ESP (sin audio). Los dos ESP se conectan a
 # este puerto —vía tailnet o LAN—, mandan el nombre de la sala y el relay copia
 # bytes de uno al otro. Corre en el mismo proceso que la API, en otro puerto.
@@ -82,14 +75,30 @@ CALL_RELAY_HOST = os.getenv("CALL_RELAY_HOST", "0.0.0.0")
 CALL_RELAY_PORT = int(os.getenv("CALL_RELAY_PORT", "8001"))
 CALL_RELAY_ENABLED = os.getenv("CALL_RELAY_ENABLED", "1").lower() not in ("0", "false", "no")
 
-_tuya_lamps_raw = os.getenv("TUYA_LAMPS", "").strip()
-try:
-    TUYA_LAMPS = json.loads(_tuya_lamps_raw) if _tuya_lamps_raw else []
-    if not isinstance(TUYA_LAMPS, list):
-        raise ValueError("TUYA_LAMPS tiene que ser una lista JSON")
-except (json.JSONDecodeError, ValueError) as error:
-    print(f"[Config] TUYA_LAMPS inválido, se ignora: {error}")
-    TUYA_LAMPS = []
+
+def _lamp_list(var_name: str) -> list:
+    raw = os.getenv(var_name, "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError("tiene que ser una lista JSON")
+        return parsed
+    except (json.JSONDecodeError, ValueError) as error:
+        print(f"[Config] {var_name} inválido, se ignora: {error}")
+        return []
+
+
+# Lámparas Tuya: objeto por lámpara con nombre, id, key, ip y (opcional) version.
+# Los valores salen de `python -m tinytuya wizard`.
+# Lámparas WiZ (app WiZ): objeto con nombre e ip (opcional mac). Se controlan por
+# UDP en la LAN con pywizlight; no hace falta ninguna clave.
+# En cualquiera de las dos, "equipos": ["josefina"] limita la lámpara a esos
+# equipos (sin el campo, la ve cualquiera con control de lámparas habilitado).
+# Ej WIZ_LAMPS=[{"nombre":"velador","ip":"192.168.1.60","equipos":["josefina"]}]
+TUYA_LAMPS = _lamp_list("TUYA_LAMPS")
+WIZ_LAMPS = _lamp_list("WIZ_LAMPS")
 
 FAST_GENAI_CONFIG = types.GenerateContentConfig(
     thinking_config=types.ThinkingConfig(thinking_budget=0),

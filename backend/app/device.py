@@ -78,7 +78,11 @@ def load_config(device: str = DEFAULT_DEVICE) -> DeviceConfig:
     path = _config_path(device)
     if path.exists():
         try:
-            return DeviceConfig(**json.loads(path.read_text(encoding="utf-8")))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            # tuya_enabled se renombró a lamps_enabled (ahora cubre Tuya y WiZ).
+            if "lamps_enabled" not in data and "tuya_enabled" in data:
+                data["lamps_enabled"] = data.pop("tuya_enabled")
+            return DeviceConfig(**data)
         except Exception as error:
             print(f"[Device Config Load Error] {device}: {error}")
             return DeviceConfig(updated_at=_now())
@@ -99,7 +103,7 @@ def _capability_defaults(device: str) -> dict:
     """Valor inicial de los flags de capacidad para un equipo sin perfil aún."""
     return {
         "rag_enabled": device not in config.RAG_DISABLED_DEVICES,
-        "tuya_enabled": device in config.TUYA_DEVICES,
+        "lamps_enabled": not config.LAMP_DEVICES or device in config.LAMP_DEVICES,
     }
 
 

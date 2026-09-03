@@ -180,8 +180,8 @@ En el primer arranque:
   - Multipart con `file` (audio) y `session_id`.
   - Devuelve `audio/mpeg` + header `X-Action` para hardware.
 - `POST /update-personality`
-  - Body JSON: `{"device": "franco", "personality_text": "...", "rag_enabled": true, "tuya_enabled": true}`.
-    Cambia la personalidad y los flags de notas/RAG y lámparas Tuya del equipo.
+  - Body JSON: `{"device": "franco", "personality_text": "...", "rag_enabled": true, "lamps_enabled": true}`.
+    Cambia la personalidad y los flags de notas/RAG y lámparas de la habitación del equipo.
 - `GET /notes`, `GET /personality`, `GET /device`, `GET /firmware`
   - Las secciones del panel. `GET /` y `GET /dashboard` redirigen a la primera
     útil (`/notes`, o `/personality` si el equipo no usa notas).
@@ -193,11 +193,11 @@ En el primer arranque:
     color/brillo del RGB y la imagen activa con su checksum.
 - `GET /device/config/full?device=<nombre>`
   - Perfil completo del equipo (incluye `personality`, `rag_enabled` y
-    `tuya_enabled`). Lo usa el panel.
+    `lamps_enabled`). Lo usa el panel.
 - `POST /device/config?device=<nombre>`
   - Actualizacion parcial (`rgb_enabled`, `rgb_color`, `rgb_brightness`,
     `filament_enabled`, `display_enabled`, `image_id`, `clear_image`,
-    `personality`, `rag_enabled`, `tuya_enabled`).
+    `personality`, `rag_enabled`, `lamps_enabled`).
     Cada cambio sube `revision`, que es lo que dispara el refresco en el firmware.
 - `GET /device/images` / `POST /device/images` / `DELETE /device/images/{id}`
   - Catalogo, subida y borrado de imagenes. Todo se normaliza a 240x240.
@@ -232,13 +232,23 @@ Cada equipo tiene su **propio perfil**:
   capturas/tareas por voz. Además la sección **Notas** ni aparece en el panel
   para ese equipo. `RAG_DISABLED_DEVICES` en `.env` fija el valor inicial (por
   defecto Franco arranca sin notas/RAG); se puede cambiar desde `/personality`.
-- `tuya_enabled`: si está apagado, el asistente de ese equipo no controla las
-  lámparas Tuya de la habitación (sus propias luces sí). `TUYA_DEVICES` en `.env`
-  es la lista blanca inicial (por defecto sólo Franco); se cambia desde
-  `/personality`.
+- `lamps_enabled`: si está apagado, el asistente de ese equipo no controla las
+  lámparas de la habitación (sus propias luces LED/filamento sí). Se cambia desde
+  `/personality`; `LAMP_DEVICES` en `.env` fija el valor inicial (vacío = todos).
 
 El historial de conversación de voz también es por equipo. El vault de notas
 (`/notes`, `/process-notes`) es único y compartido.
+
+### Lámparas de la habitación (Tuya y WiZ)
+
+Cada lámpara se define en `.env` como Tuya (`TUYA_LAMPS`, vía `tinytuya`) o WiZ
+(`WIZ_LAMPS`, vía `pywizlight` — sólo nombre e IP, sin claves). Para el asistente
+son todas iguales: `controlar_lampara_habitacion` con el nombre de la lámpara.
+
+Para que cada uno controle sólo las suyas, agregá `"equipos": ["josefina"]` a la
+lámpara (sin ese campo la ve cualquier equipo con `lamps_enabled`). Ejemplo: las
+Tuya de Franco con `"equipos": ["franco"]` y las WiZ de Josefina con
+`"equipos": ["josefina"]`.
 
 ## Configuracion del dispositivo
 

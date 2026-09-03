@@ -11,10 +11,13 @@ Dos destinos, misma interfaz para el modelo:
   mini-sintaxis que ya entiende ``commands.cpp`` (``LED_RGB:r,g,b``,
   ``LED_BRIGHTNESS:v``, ``FILAMENT_ON/OFF``, ``ALL_OFF``) y ``main.py`` la manda
   en la cabecera ``X-Action`` de la respuesta de voz.
-- ``controlar_lampara_habitacion``: las lámparas Tuya de la habitación, por LAN,
-  con tinytuya. El Pi las alcanza directo.
+- ``controlar_lampara_habitacion``: las lámparas de la habitación por LAN. Cada
+  lámpara es Tuya (tinytuya) o WiZ (pywizlight), pero para el modelo son todas
+  iguales: sólo elige el nombre. Cada lámpara puede limitarse a ciertos equipos
+  con su campo ``equipos``.
 """
 
+import asyncio
 from typing import Optional
 
 from google.genai import types
@@ -26,31 +29,65 @@ try:  # tinytuya sólo hace falta en el Pi; los tests y el arranque no deben dep
 except ImportError:  # pragma: no cover - depende del entorno
     tinytuya = None
 
+try:  # idem pywizlight, para las lámparas WiZ.
+    from pywizlight import PilotBuilder, wizlight
+except ImportError:  # pragma: no cover - depende del entorno
+    PilotBuilder = wizlight = None
+
 
 ESP_TOOL = "controlar_asistente_escritorio"
-TUYA_TOOL = "controlar_lampara_habitacion"
+LAMP_TOOL = "controlar_lampara_habitacion"
 
-# nombre normalizado -> especificación cruda del .env
+# nombre normalizado -> especificación normalizada (incluye "tipo" y "equipos")
 _lamparas: dict[str, dict] = {}
-# nombre normalizado -> instancia tinytuya reutilizada (socket persistente)
+# nombre -> instancia tinytuya reutilizada (socket persistente). WiZ no cachea:
+# es UDP sin estado y crear el objeto es barato.
 _bulbs: dict[str, object] = {}
-# nombres para el enum de la función y el prompt
+# todos los nombres registrados (haya o no filtro por equipo)
 LAMP_NAMES: list[str] = []
 
 
-def registrar_lamparas(lamparas: list[dict]) -> None:
-    """Rearma el catálogo de lámparas Tuya. Idempotente; los tests la reusan."""
+def _normalize(especificacion: dict, tipo: str) -> Optional[dict]:
+    nombre = str(especificacion.get("nombre", "")).strip().lower()
+    if not nombre:
+        return None
+    if tipo == "tuya" and not (especificacion.get("id") and especificacion.get("key")):
+        return None
+    if tipo == "wiz" and not especificacion.get("ip"):
+        return None
+    equipos = especificacion.get("equipos")
+    return {
+        **especificacion,
+        "nombre": nombre,
+        "tipo": tipo,
+        "equipos": {str(e).strip().lower() for e in equipos} if equipos else None,
+    }
+
+
+def registrar_lamparas(tuya: list[dict], wiz: Optional[list[dict]] = None) -> None:
+    """Rearma el catálogo de lámparas. Idempotente; los tests la reusan."""
     global LAMP_NAMES
     _lamparas.clear()
     _bulbs.clear()
-    for especificacion in lamparas or []:
-        nombre = str(especificacion.get("nombre", "")).strip().lower()
-        if nombre and especificacion.get("id") and especificacion.get("key"):
-            _lamparas[nombre] = especificacion
+    for tipo, lista in (("tuya", tuya), ("wiz", wiz or [])):
+        for especificacion in lista or []:
+            normalizada = _normalize(especificacion, tipo)
+            if normalizada:
+                _lamparas[normalizada["nombre"]] = normalizada
     LAMP_NAMES = sorted(_lamparas)
 
 
-registrar_lamparas(config.TUYA_LAMPS)
+registrar_lamparas(config.TUYA_LAMPS, config.WIZ_LAMPS)
+
+
+def lamp_names_for(device: str) -> list[str]:
+    """Lámparas que puede tocar `device`: las sin filtro y las que lo listan."""
+    device = (device or "").strip().lower()
+    return sorted(
+        nombre
+        for nombre, spec in _lamparas.items()
+        if not spec["equipos"] or device in spec["equipos"]
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -90,9 +127,9 @@ def _esp_declaration() -> types.FunctionDeclaration:
     )
 
 
-def _tuya_declaration(nombres: list[str]) -> types.FunctionDeclaration:
+def _lamp_declaration(nombres: list[str]) -> types.FunctionDeclaration:
     return types.FunctionDeclaration(
-        name=TUYA_TOOL,
+        name=LAMP_TOOL,
         description="Prende, apaga o cambia el color y el brillo de las lámparas de la habitación.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
@@ -120,30 +157,32 @@ def _tuya_declaration(nombres: list[str]) -> types.FunctionDeclaration:
     )
 
 
-def light_declarations(tuya: bool = True) -> list[types.FunctionDeclaration]:
-    """Las declaraciones de luces. La de Tuya sólo si hay lámparas configuradas
-    y el equipo tiene permiso (`tuya`)."""
+def light_declarations(device: str = "", lamps_enabled: bool = True) -> list[types.FunctionDeclaration]:
+    """Las declaraciones de luces. La de las lámparas sólo si el equipo tiene
+    permiso (`lamps_enabled`) y hay al menos una lámpara a su alcance."""
     declaraciones = [_esp_declaration()]
-    if tuya and LAMP_NAMES:
-        declaraciones.append(_tuya_declaration(LAMP_NAMES))
+    nombres = lamp_names_for(device) if lamps_enabled else []
+    if nombres:
+        declaraciones.append(_lamp_declaration(nombres))
     return declaraciones
 
 
-def build_light_tools(tuya: bool = True) -> list[types.Tool]:
-    """Las tools para pasarle a generate_content. La de Tuya sólo si hay lámparas."""
-    return [types.Tool(function_declarations=light_declarations(tuya))]
+def build_light_tools(device: str = "", lamps_enabled: bool = True) -> list[types.Tool]:
+    """Las tools para pasarle a generate_content."""
+    return [types.Tool(function_declarations=light_declarations(device, lamps_enabled))]
 
 
-def tools_prompt(tuya: bool = True) -> str:
+def tools_prompt(device: str = "", lamps_enabled: bool = True) -> str:
     """Bloque para el system prompt: qué funciones hay y cuándo usarlas."""
     lineas = [
         "[CONTROL DE LUCES]",
         "Tenés funciones para las luces. Llamalas SÓLO si te lo piden explícitamente:",
         f"- {ESP_TOOL}: LED RGB, filamento y apagado del asistente de escritorio.",
     ]
-    if tuya and LAMP_NAMES:
+    nombres = lamp_names_for(device) if lamps_enabled else []
+    if nombres:
         lineas.append(
-            f"- {TUYA_TOOL}: las lámparas de la habitación ({', '.join(LAMP_NAMES)})."
+            f"- {LAMP_TOOL}: las lámparas de la habitación ({', '.join(nombres)})."
         )
     lineas.append("Cuando llames una función, incluí igual una frase corta de confirmación hablada.")
     lineas.append("Si no te piden tocar las luces, no llames ninguna función.")
@@ -185,22 +224,12 @@ def confirmacion_por_defecto(fragmentos: list[str]) -> str:
     return frase[0].upper() + frase[1:] + "."
 
 
-def _bulb(nombre: str):
-    if nombre in _bulbs:
-        return _bulbs[nombre]
-    especificacion = _lamparas.get(nombre)
-    if especificacion is None or tinytuya is None:
-        return None
-    bulb = tinytuya.BulbDevice(
-        dev_id=especificacion["id"],
-        address=especificacion.get("ip"),
-        local_key=especificacion["key"],
-        version=float(especificacion.get("version", 3.4)),
-    )
-    bulb.set_socketTimeout(3)
-    bulb.set_socketPersistent(True)
-    _bulbs[nombre] = bulb
-    return bulb
+def _frase_lampara(nombre: str, encender, rgb, brillo) -> str:
+    if encender is False and rgb is None and brillo is None:
+        return f"apagué la lámpara {nombre}"
+    if encender and rgb is None and brillo is None:
+        return f"prendí la lámpara {nombre}"
+    return f"listo con la lámpara {nombre}"
 
 
 def _aplicar_esp(args: dict, pending_esp: list[str]) -> str:
@@ -234,8 +263,28 @@ def _aplicar_esp(args: dict, pending_esp: list[str]) -> str:
     return _unir(hechos)
 
 
-def _aplicar_tuya(args: dict) -> str:
-    nombre = str(args.get("lampara", "")).strip().lower()
+# --- Tuya (tinytuya, TCP) --------------------------------------------------- #
+
+
+def _bulb(nombre: str):
+    if nombre in _bulbs:
+        return _bulbs[nombre]
+    especificacion = _lamparas.get(nombre)
+    if especificacion is None or especificacion.get("tipo") != "tuya" or tinytuya is None:
+        return None
+    bulb = tinytuya.BulbDevice(
+        dev_id=especificacion["id"],
+        address=especificacion.get("ip"),
+        local_key=especificacion["key"],
+        version=float(especificacion.get("version", 3.4)),
+    )
+    bulb.set_socketTimeout(3)
+    bulb.set_socketPersistent(True)
+    _bulbs[nombre] = bulb
+    return bulb
+
+
+def _aplicar_tuya(nombre: str, args: dict) -> str:
     bulb = _bulb(nombre)
     if bulb is None:
         return f"no encontré la lámpara {nombre or 'que me pediste'}"
@@ -259,23 +308,75 @@ def _aplicar_tuya(args: dict) -> str:
         print(f"[Tuya] {nombre}: {type(error).__name__}: {error}")
         return f"no pude conectar con la lámpara {nombre}"
 
-    if encender and rgb is None and brillo is None:
-        return f"prendí la lámpara {nombre}"
-    return f"listo con la lámpara {nombre}"
+    return _frase_lampara(nombre, encender, rgb, brillo)
+
+
+# --- WiZ (pywizlight, UDP asíncrono) -------------------------------------- #
+
+
+async def _wiz_apply(ip: str, encender, rgb, brillo) -> None:
+    bulb = wizlight(ip)
+    try:
+        if encender is False and rgb is None and brillo is None:
+            await bulb.turn_off()
+            return
+        params: dict = {}
+        if rgb:
+            params["rgb"] = rgb
+        if brillo is not None:
+            params["brightness"] = max(1, min(255, round(int(brillo) * 255 / 100)))
+        await bulb.turn_on(PilotBuilder(**params) if params else PilotBuilder())
+    finally:
+        await bulb.async_close()
+
+
+def _aplicar_wiz(nombre: str, especificacion: dict, args: dict) -> str:
+    if wizlight is None:
+        return f"no puedo con la lámpara {nombre}: falta pywizlight en el servidor"
+
+    encender = args.get("encender")
+    rgb = _parse_rgb(args.get("color_rgb"))
+    brillo = args.get("brillo")
+
+    try:
+        asyncio.run(_wiz_apply(especificacion["ip"], encender, rgb, brillo))
+    except Exception as error:  # noqa: BLE001 - la lámpara puede estar offline
+        print(f"[WiZ] {nombre}: {type(error).__name__}: {error}")
+        return f"no pude conectar con la lámpara {nombre}"
+
+    return _frase_lampara(nombre, encender, rgb, brillo)
+
+
+def _aplicar_lampara(args: dict) -> str:
+    nombre = str(args.get("lampara", "")).strip().lower()
+    especificacion = _lamparas.get(nombre)
+    if especificacion is None:
+        return f"no encontré la lámpara {nombre or 'que me pediste'}"
+    if especificacion["tipo"] == "wiz":
+        return _aplicar_wiz(nombre, especificacion, args)
+    return _aplicar_tuya(nombre, args)
 
 
 def aplicar_accion_luz(
-    name: str, args: dict, pending_esp: list[str], allow_tuya: bool = True
+    name: str,
+    args: dict,
+    pending_esp: list[str],
+    device: str = "",
+    lamps_enabled: bool = True,
 ) -> str:
     """Ejecuta un function_call del modelo. Devuelve una frase de confirmación."""
     if name == ESP_TOOL:
         return _aplicar_esp(args or {}, pending_esp)
-    if name == TUYA_TOOL:
-        # Defensa: el equipo sin permiso ni siquiera recibe la declaración, pero
-        # si un modelo la inventa igual, no se toca la lámpara.
-        if not allow_tuya:
-            print("[Luces] llamada a Tuya de un equipo sin permiso; se ignora.")
+    if name == LAMP_TOOL:
+        # Defensa: el equipo sin permiso (o sin esa lámpara a su alcance) ni
+        # siquiera recibe la declaración; si un modelo la inventa igual, una
+        # lámpara real que no le corresponde no se toca. Una lámpara inexistente
+        # sí pasa, para que _aplicar_lampara conteste "no encontré…".
+        args = args or {}
+        nombre = str(args.get("lampara", "")).strip().lower()
+        if nombre in _lamparas and not (lamps_enabled and nombre in lamp_names_for(device)):
+            print(f"[Luces] {nombre} fuera del alcance de {device or 'sin equipo'}; se ignora.")
             return ""
-        return _aplicar_tuya(args or {})
+        return _aplicar_lampara(args)
     print(f"[Luces] función desconocida: {name}")
     return ""

@@ -68,47 +68,72 @@ def test_esp_clamps_brightness_to_255_scale():
 
 
 # --------------------------------------------------------------------------- #
-# Lámparas Tuya
+# Lámparas de la habitación: Tuya (tinytuya, TCP)
 # --------------------------------------------------------------------------- #
 
 
-def test_tuya_turn_off_only_calls_off(monkeypatch):
+@pytest.fixture
+def velador_tuya():
+    lights.registrar_lamparas([{"nombre": "velador", "id": "a", "key": "b", "ip": "1.2.3.4"}])
+    yield
+
+
+def test_tuya_turn_off_only_calls_off(monkeypatch, velador_tuya):
     fake = FakeBulb()
     monkeypatch.setattr(lights, "_bulb", lambda nombre: fake)
     frase = lights.aplicar_accion_luz(
-        lights.TUYA_TOOL, {"lampara": "velador", "encender": False}, []
+        lights.LAMP_TOOL, {"lampara": "velador", "encender": False}, []
     )
     assert fake.calls == [("off",)]
     assert "apagué" in frase.lower()
 
 
-def test_tuya_color_change_turns_the_lamp_on_first(monkeypatch):
+def test_tuya_color_change_turns_the_lamp_on_first(monkeypatch, velador_tuya):
     fake = FakeBulb()
     monkeypatch.setattr(lights, "_bulb", lambda nombre: fake)
     lights.aplicar_accion_luz(
-        lights.TUYA_TOOL,
+        lights.LAMP_TOOL,
         {"lampara": "velador", "color_rgb": "0,255,0", "brillo": 80},
         [],
     )
     assert fake.calls == [("on",), ("colour", 0, 255, 0), ("brightness", 80)]
 
 
-def test_tuya_unknown_lamp_is_reported(monkeypatch):
-    monkeypatch.setattr(lights, "_bulb", lambda nombre: None)
-    frase = lights.aplicar_accion_luz(lights.TUYA_TOOL, {"lampara": "cocina"}, [])
+def test_unknown_lamp_is_reported(velador_tuya):
+    frase = lights.aplicar_accion_luz(lights.LAMP_TOOL, {"lampara": "cocina"}, [])
     assert "no encontré" in frase.lower()
 
 
-def test_tuya_offline_lamp_does_not_raise(monkeypatch):
+def test_tuya_offline_lamp_does_not_raise(monkeypatch, velador_tuya):
     class Boom:
         def turn_on(self):
             raise OSError("timeout")
 
     monkeypatch.setattr(lights, "_bulb", lambda nombre: Boom())
     frase = lights.aplicar_accion_luz(
-        lights.TUYA_TOOL, {"lampara": "velador", "encender": True}, []
+        lights.LAMP_TOOL, {"lampara": "velador", "encender": True}, []
     )
     assert "no pude conectar" in frase.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Lámparas de la habitación: WiZ (pywizlight, UDP asíncrono)
+# --------------------------------------------------------------------------- #
+
+
+def test_wiz_lamp_dispatches_to_pywizlight(monkeypatch):
+    lights.registrar_lamparas([], [{"nombre": "wizled", "ip": "10.0.0.9"}])
+    llamadas = []
+
+    async def _fake_apply(ip, encender, rgb, brillo):
+        llamadas.append((ip, encender, rgb, brillo))
+
+    monkeypatch.setattr(lights, "_wiz_apply", _fake_apply)
+    frase = lights.aplicar_accion_luz(
+        lights.LAMP_TOOL, {"lampara": "wizled", "color_rgb": "0,0,255"}, []
+    )
+    assert llamadas == [("10.0.0.9", None, (0, 0, 255), None)]
+    assert "wizled" in frase.lower()
 
 
 # --------------------------------------------------------------------------- #
@@ -120,44 +145,57 @@ def test_only_the_esp_tool_is_offered_without_lamps():
     tools = lights.build_light_tools()
     assert len(tools) == 1
     assert [d.name for d in tools[0].function_declarations] == [lights.ESP_TOOL]
-    assert lights.TUYA_TOOL not in lights.tools_prompt()
+    assert lights.LAMP_TOOL not in lights.tools_prompt()
 
 
-def test_tuya_tool_appears_with_lamp_names_as_enum():
+def test_lamp_tool_mixes_tuya_and_wiz_names_as_enum():
     lights.registrar_lamparas(
-        [{"nombre": "Velador", "id": "a", "key": "b", "ip": "1.2.3.4"}]
+        [{"nombre": "Velador", "id": "a", "key": "b", "ip": "1.2.3.4"}],
+        [{"nombre": "Techo", "ip": "10.0.0.9"}],
     )
     declaraciones = {d.name: d for d in lights.build_light_tools()[0].function_declarations}
-    assert set(declaraciones) == {lights.ESP_TOOL, lights.TUYA_TOOL}
-    assert declaraciones[lights.TUYA_TOOL].parameters.properties["lampara"].enum == ["velador"]
-    assert "velador" in lights.tools_prompt()
+    assert set(declaraciones) == {lights.ESP_TOOL, lights.LAMP_TOOL}
+    assert declaraciones[lights.LAMP_TOOL].parameters.properties["lampara"].enum == ["techo", "velador"]
+    assert "velador" in lights.tools_prompt() and "techo" in lights.tools_prompt()
 
 
-def test_tuya_tool_is_withheld_from_a_device_without_permission():
+def test_lamps_are_scoped_by_the_equipos_field():
     lights.registrar_lamparas(
-        [{"nombre": "Velador", "id": "a", "key": "b", "ip": "1.2.3.4"}]
+        [{"nombre": "franco-tuya", "id": "a", "key": "b", "ip": "1.1.1.1", "equipos": ["franco"]}],
+        [{"nombre": "jose-wiz", "ip": "2.2.2.2", "equipos": ["josefina"]}],
     )
-    declaraciones = [d.name for d in lights.build_light_tools(tuya=False)[0].function_declarations]
-    assert declaraciones == [lights.ESP_TOOL]
-    assert lights.TUYA_TOOL not in lights.tools_prompt(tuya=False)
-    # Con permiso (default) sí aparece.
-    assert lights.TUYA_TOOL in {d.name for d in lights.build_light_tools()[0].function_declarations}
+    assert lights.lamp_names_for("franco") == ["franco-tuya"]
+    assert lights.lamp_names_for("josefina") == ["jose-wiz"]
+    # Franco no recibe la lámpara de Josefina en su declaración.
+    franco_tools = lights.build_light_tools("franco")[0].function_declarations
+    assert franco_tools[1].parameters.properties["lampara"].enum == ["franco-tuya"]
 
 
-def test_tuya_call_from_a_device_without_permission_is_a_no_op(monkeypatch):
-    called = False
+def test_lamp_tool_is_withheld_from_a_device_without_permission():
+    lights.registrar_lamparas([{"nombre": "velador", "id": "a", "key": "b", "ip": "1.2.3.4"}])
+    withheld = [d.name for d in lights.build_light_tools("franco", lamps_enabled=False)[0].function_declarations]
+    assert withheld == [lights.ESP_TOOL]
+    assert lights.LAMP_TOOL not in lights.tools_prompt("franco", lamps_enabled=False)
+    assert lights.LAMP_TOOL in {d.name for d in lights.build_light_tools("franco")[0].function_declarations}
+
+
+def test_lamp_call_without_permission_is_a_no_op(monkeypatch):
+    lights.registrar_lamparas(
+        [{"nombre": "velador", "id": "a", "key": "b", "ip": "1.2.3.4", "equipos": ["franco"]}]
+    )
 
     def _boom(_nombre):
-        nonlocal called
-        called = True
         raise AssertionError("no debería tocar la lámpara")
 
     monkeypatch.setattr(lights, "_bulb", _boom)
-    frase = lights.aplicar_accion_luz(
-        lights.TUYA_TOOL, {"lampara": "velador", "encender": True}, [], allow_tuya=False
-    )
-    assert frase == ""
-    assert called is False
+    # Equipo con el flag de lámparas apagado.
+    assert lights.aplicar_accion_luz(
+        lights.LAMP_TOOL, {"lampara": "velador", "encender": True}, [], "franco", lamps_enabled=False
+    ) == ""
+    # Equipo al que esa lámpara no le pertenece (equipos=["franco"]).
+    assert lights.aplicar_accion_luz(
+        lights.LAMP_TOOL, {"lampara": "velador", "encender": True}, [], "josefina"
+    ) == ""
 
 
 def test_registrar_skips_incomplete_lamps():

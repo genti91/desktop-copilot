@@ -42,7 +42,7 @@ class PersonalityPayload(BaseModel):
     personality_text: str
     device: str = "default"
     rag_enabled: Optional[bool] = None
-    tuya_enabled: Optional[bool] = None
+    lamps_enabled: Optional[bool] = None
 
 
 class DeviceImage(BaseModel):
@@ -66,7 +66,8 @@ class DeviceConfig(BaseModel):
     # el perfil del dispositivo para que cada ESP se configure por separado.
     personality: str = DEFAULT_PERSONALITY
     rag_enabled: bool = True
-    tuya_enabled: bool = True
+    # Control por voz de las lámparas de la habitación (Tuya o WiZ).
+    lamps_enabled: bool = True
     updated_at: str = ""
 
 
@@ -82,7 +83,7 @@ class DeviceConfigUpdate(BaseModel):
     clear_image: bool = False
     personality: Optional[str] = None
     rag_enabled: Optional[bool] = None
-    tuya_enabled: Optional[bool] = None
+    lamps_enabled: Optional[bool] = None
 
 
 class FirmwareManifest(BaseModel):

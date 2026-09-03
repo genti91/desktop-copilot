@@ -139,14 +139,28 @@ def test_new_device_starts_without_rag_when_listed_in_rag_disabled(client, monke
     assert client.get("/device/config/full?device=josefina").json()["rag_enabled"] is True
 
 
-def test_tuya_control_follows_the_allowlist(client, monkeypatch):
-    monkeypatch.setattr(device.config, "TUYA_DEVICES", ["franco"])
-    assert client.get("/device/config/full?device=franco").json()["tuya_enabled"] is True
-    assert client.get("/device/config/full?device=josefina").json()["tuya_enabled"] is False
+def test_lamp_control_defaults_and_toggle(client, monkeypatch):
+    # Vacío = todos los equipos arrancan con control de lámparas.
+    monkeypatch.setattr(device.config, "LAMP_DEVICES", [])
+    assert client.get("/device/config/full?device=josefina").json()["lamps_enabled"] is True
+
+    # Con lista, sólo los listados.
+    monkeypatch.setattr(device.config, "LAMP_DEVICES", ["franco"])
+    assert client.get("/device/config/full?device=franco").json()["lamps_enabled"] is True
+    assert client.get("/device/config/full?device=nadie").json()["lamps_enabled"] is False
 
     # El toggle del panel pisa el default y persiste.
-    client.post("/device/config?device=josefina", json={"tuya_enabled": True})
-    assert client.get("/device/config/full?device=josefina").json()["tuya_enabled"] is True
+    client.post("/device/config?device=nadie", json={"lamps_enabled": True})
+    assert client.get("/device/config/full?device=nadie").json()["lamps_enabled"] is True
+
+
+def test_legacy_tuya_enabled_key_migrates_to_lamps_enabled(client):
+    (device.DEVICES_DIR / "josefina.json").write_text(
+        '{"revision": 3, "tuya_enabled": false}', encoding="utf-8"
+    )
+    profile = client.get("/device/config/full?device=josefina").json()
+    assert profile["lamps_enabled"] is False
+    assert "tuya_enabled" not in profile
 
 
 def test_deleting_a_catalog_image_clears_it_on_every_device(client):
