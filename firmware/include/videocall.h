@@ -12,6 +12,13 @@
 // La sala se arma como sorted(nombre_propio, persona) unida por "+": los dos
 // equipos tienen que iniciar la llamada para caer en la misma sala. El nombre
 // propio sale del campo "Nombre de este equipo" del portal (device_name).
+//
+// Antes de que haya video del otro lado —mientras suena la entrante y mientras
+// se espera que atiendan la saliente— la pantalla muestra la cámara de este
+// mismo equipo con el texto en una franja abajo, para poder encuadrar.
+//
+// Si el equipo entra por el tailnet, la llamada baja los cuadros por segundo y
+// sube la compresión sola: por el túnel el retardo pesa más que la fluidez.
 
 // Anota a quién llamar. No arranca la llamada todavía.
 void requestVideoCall(const String& persona);
@@ -28,6 +35,7 @@ void runVideoCall();
 void requestIncomingCall(const String& from);
 bool incomingCallPending();
 
-// Muestra "<from> te está llamando", pone el LED rojo y espera un toque para
-// atender (hasta ~35 s). Si se atiende, encadena la videollamada. Bloquea.
+// Muestra "<from> te está llamando" sobre la cámara propia, pone el LED rojo y
+// espera un toque para atender (hasta ~35 s). Si se atiende, encadena la
+// videollamada dejando la cámara ya prendida. Bloquea.
 void runIncomingCall();

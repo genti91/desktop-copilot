@@ -60,6 +60,29 @@ async def test_relay_pipes_bytes_both_ways_between_paired_sockets():
 
 
 @pytest.mark.anyio
+async def test_relay_moves_more_than_its_write_buffer_without_trabarse():
+    """El tope de _WRITE_HIGH_WATER frena al que escribe, no lo cuelga: varios
+    cuadros seguidos tienen que llegar enteros y en orden."""
+    payload = bytes(range(256)) * 400  # ~100 KB, muy por encima del tope
+    async with relay() as port:
+        a_reader, a_writer = await join(port, "franco+jose")
+        b_reader, b_writer = await join(port, "franco+jose")
+        await asyncio.sleep(0.05)
+
+        async def enviar():
+            a_writer.write(payload)
+            await a_writer.drain()
+
+        recibido = await asyncio.wait_for(
+            asyncio.gather(enviar(), b_reader.readexactly(len(payload))), 5
+        )
+        assert recibido[1] == payload
+
+        for w in (a_writer, b_writer):
+            w.close()
+
+
+@pytest.mark.anyio
 async def test_relay_drops_the_other_side_when_one_hangs_up():
     async with relay() as port:
         a_reader, a_writer = await join(port, "sala")

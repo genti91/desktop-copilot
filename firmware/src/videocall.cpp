@@ -24,6 +24,25 @@ namespace {
 constexpr uint16_t CALL_RELAY_PORT = 8001;
 
 constexpr uint32_t TX_INTERVAL_MS = 90;              // ~11 fps de subida
+// Por el tailnet cada paquete pasa por WireGuard en el propio ESP, así que el
+// enlace da bastante menos que la LAN: a 11 fps las colas se llenan y lo que se
+// nota no es que falten cuadros sino el retardo. Menos cuadros y más compresión
+// (un q20 ronda 4 KB contra los 8 del q12) lo bajan mucho más que subir el fps.
+constexpr uint32_t TX_INTERVAL_TAILNET_MS = 200;     // ~5 fps
+constexpr int JPEG_QUALITY_LAN = 12;
+constexpr int JPEG_QUALITY_TAILNET = 20;
+// Si al terminar de leer un cuadro ya hay este tanto de bytes esperando, vamos
+// atrasados: ese cuadro se descarta sin decodificar y se pasa al siguiente. La
+// ventana de recepción de lwIP son 5744 bytes, así que 4 KB encolados es tenerla
+// casi llena: el que manda viene bastante adelante. Más abajo el umbral empieza
+// a tirar cuadros buenos en LAN, donde alcanzan a entrar unos KB del siguiente
+// mientras se decodifica el actual.
+constexpr int RX_BACKLOG_DROP_BYTES = 4096;
+// Cada cuánto se refresca la vista de la cámara propia (llamando / sonando).
+// No hace falta más: es sólo para encuadrar, y decodificar cuesta.
+constexpr uint32_t PREVIEW_INTERVAL_MS = 150;
+// Franja negra abajo donde va el texto cuando atrás se ve la cámara propia.
+constexpr int16_t OVERLAY_H = 46;
 constexpr size_t MAX_JPEG_BYTES = 60 * 1024;         // un 240x240 q12 ronda 8 KB
 // Cuánto se muestra "Llamando a ..." esperando que el otro inicie su llamada.
 // Menos que el _PAIR_WAIT_TIMEOUT_S del relay (240 s) para colgar limpio primero.
@@ -61,7 +80,7 @@ camera_config_t cameraConfig() {
   config.ledc_channel = LEDC_CHANNEL_0;
   config.pixel_format = PIXFORMAT_JPEG;
   config.frame_size = FRAMESIZE_240X240;
-  config.jpeg_quality = 12;
+  config.jpeg_quality = tailnetEnabled() ? JPEG_QUALITY_TAILNET : JPEG_QUALITY_LAN;
   config.fb_count = 2;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.grab_mode = CAMERA_GRAB_LATEST;
@@ -93,6 +112,30 @@ void showMessage(const char* line1, const char* line2, uint16_t color) {
   tft.setTextSize(2);
   tft.drawCentreString(line1, SCREEN_W / 2, SCREEN_H / 2 - 20, 1);
   if (line2 != nullptr) tft.drawCentreString(line2, SCREEN_W / 2, SCREEN_H / 2 + 8, 1);
+}
+
+// Mismo texto que showMessage() pero en una franja abajo, para que no tape la
+// imagen de la cámara propia que quedó dibujada atrás.
+void drawOverlay(const char* line1, const char* line2, uint16_t color) {
+  tft.fillRect(0, SCREEN_H - OVERLAY_H, SCREEN_W, OVERLAY_H, TFT_BLACK);
+  tft.setTextColor(color, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.drawCentreString(line1, SCREEN_W / 2, SCREEN_H - OVERLAY_H + 5, 1);
+  if (line2 != nullptr) tft.drawCentreString(line2, SCREEN_W / 2, SCREEN_H - OVERLAY_H + 24, 1);
+}
+
+// Dibuja lo que está viendo la cámara de este equipo, con el texto encima. Sirve
+// para encuadrar antes de que el otro lado empiece a ver: mientras suena la
+// entrante y mientras se espera que atiendan la saliente.
+bool drawSelfPreview(uint8_t* rgb, const char* line1, const char* line2, uint16_t color) {
+  camera_fb_t* frame = esp_camera_fb_get();
+  if (frame == nullptr) return false;
+  const bool ok = frame->len > 0 && jpg2rgb565(frame->buf, frame->len, rgb, JPG_SCALE_NONE);
+  esp_camera_fb_return(frame);
+  if (!ok) return false;
+  tft.pushImage(0, 0, SCREEN_W, SCREEN_H, reinterpret_cast<uint16_t*>(rgb));
+  drawOverlay(line1, line2, color);
+  return true;
 }
 
 bool startCamera() {
@@ -186,7 +229,17 @@ void runIncomingCall() {
   showMessage(from.c_str(), "te esta llamando", TFT_CYAN);
   setNotificationLed(255, 0, 0);
 
+  // La cámara se prende ya, antes de atender: así se ve el propio encuadre
+  // mientras suena y se puede acomodar el equipo antes de que el otro lado
+  // empiece a ver. Si atiende, queda prendida y runVideoCall() la reusa.
+  uint8_t* rgb = nullptr;
+  if (startCamera()) {
+    rgb = static_cast<uint8_t*>(ps_malloc(static_cast<size_t>(SCREEN_W) * SCREEN_H * 2));
+    if (rgb != nullptr) tft.setSwapBytes(true);
+  }
+
   bool answered = false;
+  uint32_t lastPreview = 0;
   const uint32_t ringStart = millis();
   while (millis() - ringStart < RING_MS) {
     if (digitalRead(TOUCH_PIN) == HIGH) {
@@ -197,11 +250,16 @@ void runIncomingCall() {
         break;
       }
     }
+    if (rgb != nullptr && millis() - lastPreview >= PREVIEW_INTERVAL_MS) {
+      lastPreview = millis();
+      drawSelfPreview(rgb, from.c_str(), "te esta llamando", TFT_CYAN);
+    }
     // Parpadeo lento para que se lea como "está sonando".
     setNotificationLed(((millis() / 450) % 2) ? 255 : 25, 0, 0);
     delay(20);
   }
 
+  free(rgb);
   clearNotificationLed();
   resumeFaceAnimation();
   resumeWakeWord();
@@ -211,6 +269,7 @@ void runIncomingCall() {
     requestVideoCall(from);  // loop() la levanta en la vuelta siguiente
   } else {
     Serial.println("📞 Llamada perdida.");
+    stopCamera();
     setFaceMode(FACE_IDLE);
   }
 }
@@ -298,7 +357,9 @@ void runVideoCall() {
   tft.setSwapBytes(true);
 
   const uint32_t callStart = millis();
+  const uint32_t txInterval = tailnetEnabled() ? TX_INTERVAL_TAILNET_MS : TX_INTERVAL_MS;
   uint32_t lastTx = 0;
+  uint32_t lastPreview = 0;
   uint32_t lastRxFrame = millis();
   bool gotFirstFrame = false;
 
@@ -361,10 +422,13 @@ void runVideoCall() {
       }
       if (got == need) {
         rxState = WANT_LEN;
-        if (decodeToScreen(jpegRx, need, rgb)) {
+        lastRxFrame = millis();
+        gotFirstFrame = true;
+        // Con cola atrás este cuadro ya es viejo: descartarlo sale gratis y
+        // dibujar el siguiente deja la imagen al día en vez de ir arrastrando
+        // el retardo. Sin esto, un enlace lento se ve "en diferido".
+        if (socket.available() < RX_BACKLOG_DROP_BYTES && decodeToScreen(jpegRx, need, rgb)) {
           tft.pushImage(0, 0, SCREEN_W, SCREEN_H, reinterpret_cast<uint16_t*>(rgb));
-          lastRxFrame = millis();
-          gotFirstFrame = true;
         }
       }
     }
@@ -374,12 +438,22 @@ void runVideoCall() {
     // mandando a su ritmo. El watchdog del núcleo 1 no está vigilado, así que un
     // frenón acá no reinicia; y si el socket muere, socket.connected() lo caza
     // en la vuelta siguiente.
-    if (millis() - lastTx >= TX_INTERVAL_MS) {
+    if (millis() - lastTx >= txInterval) {
       lastTx = millis();
       camera_fb_t* frame = esp_camera_fb_get();
       if (frame != nullptr) {
         if (frame->len > 0 && frame->len <= MAX_JPEG_BYTES && socket.connected()) {
           writeFrame(socket, frame->buf, frame->len);
+        }
+        // Mientras el otro no atendió, la pantalla muestra la cámara propia en
+        // vez de un cartel pelado: se aprovecha el mismo cuadro que se acaba de
+        // mandar, así que sólo cuesta la decodificación.
+        if (!gotFirstFrame && frame->len > 0 && millis() - lastPreview >= PREVIEW_INTERVAL_MS) {
+          lastPreview = millis();
+          if (jpg2rgb565(frame->buf, frame->len, rgb, JPG_SCALE_NONE)) {
+            tft.pushImage(0, 0, SCREEN_W, SCREEN_H, reinterpret_cast<uint16_t*>(rgb));
+            drawOverlay("Llamando a", target.c_str(), TFT_CYAN);
+          }
         }
         esp_camera_fb_return(frame);
       }

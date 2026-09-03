@@ -52,6 +52,13 @@ _HANDSHAKE_TIMEOUT_S = 10
 _PAIR_WAIT_TIMEOUT_S = 240
 _ROOM_MAX_LEN = 80
 _CHUNK = 8192
+# asyncio bufferea hasta 64 KB por socket antes de frenar al que escribe: son
+# ocho cuadros dormidos adentro del relay, casi un segundo de retardo por lado
+# cuando un ESP recibe más lento de lo que el otro manda (el del tailnet). Con
+# el tope en un cuadro, drain() frena al que va rápido y el atraso no se guarda
+# acá: el firmware ya captura siempre el cuadro más nuevo.
+_WRITE_HIGH_WATER = 8192
+_WRITE_LOW_WATER = 2048
 
 # sala -> (reader, writer, partner_llego: Future, puente_termino: Event)
 _waiting: dict[str, tuple] = {}
@@ -60,6 +67,17 @@ _waiting: dict[str, tuple] = {}
 # --------------------------------------------------------------------------- #
 # Relay
 # --------------------------------------------------------------------------- #
+
+
+def _limit_buffering(writer: asyncio.StreamWriter) -> None:
+    """Deja que el relay guarde como mucho un cuadro por sentido: ver la nota de
+    _WRITE_HIGH_WATER. Si el transporte no lo soporta, se sigue igual."""
+    try:
+        writer.transport.set_write_buffer_limits(
+            high=_WRITE_HIGH_WATER, low=_WRITE_LOW_WATER
+        )
+    except (AttributeError, NotImplementedError, OSError):
+        pass
 
 
 def _shut(writer: asyncio.StreamWriter) -> None:
@@ -102,6 +120,7 @@ async def _bridge(
 
 
 async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    _limit_buffering(writer)
     try:
         raw = await asyncio.wait_for(reader.readline(), _HANDSHAKE_TIMEOUT_S)
     except (asyncio.TimeoutError, OSError):
