@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>__TITLE__ · Desktop Co-Pilot</title>
+    <script>
+        // Equipo elegido en el panel ("quién sos"). Lo leen los scripts de cada
+        // página para pedir/guardar la config de ese equipo.
+        window.copilotDevice = function () {
+            var match = document.cookie.match(/(?:^|;\s*)copilot_device=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        };
+    </script>
     <style>
         :root {
             color-scheme: dark;
@@ -108,6 +116,59 @@
 
         .logout { flex: none; color: var(--muted); text-decoration: none; font-size: 13px; padding: 7px 10px; border-radius: 999px; }
         .logout:hover { color: var(--text); background: var(--surface); }
+
+        /* ---------- Selector de "quién sos" ---------- */
+
+        .who-chip {
+            flex: none;
+            background: var(--surface-3);
+            color: var(--text);
+            border: 1px solid var(--line-strong);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: capitalize;
+        }
+        .who-chip:hover { filter: brightness(1.12); }
+        .who-chip::after { content: " ▾"; color: var(--muted); }
+
+        .who-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: grid;
+            place-items: center;
+            padding: 20px;
+            background: rgba(9, 9, 15, .78);
+            backdrop-filter: blur(4px);
+        }
+
+        .who-card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 26px;
+            width: 100%;
+            max-width: 360px;
+            text-align: center;
+        }
+        .who-card h2 { margin: 0 0 6px; font-size: 18px; font-weight: 620; }
+        .who-card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+        .who-options { display: grid; gap: 10px; }
+        .who-options button { width: 100%; text-transform: capitalize; }
+        .who-options button.ghost { background: var(--surface-3); color: var(--text); }
+        .who-dismiss {
+            margin-top: 16px;
+            background: none;
+            border: 0;
+            color: var(--muted);
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .who-dismiss:hover { color: var(--text); }
 
         /* ---------- Estructura de página ---------- */
 
@@ -365,11 +426,12 @@
 <body>
     <header class="topbar">
         <div class="topbar-inner">
-            <a class="brand" href="/notes">
+            <a class="brand" href="/">
                 <span class="brand-mark">◆</span>
                 <span>Desktop Co-Pilot</span>
             </a>
             <nav class="nav">__NAV__</nav>
+            <button type="button" class="who-chip" id="whoChip" hidden>equipo</button>
             __LOGOUT__
         </div>
     </header>
@@ -380,5 +442,69 @@
         </div>
         __CONTENT__
     </main>
+
+    <div class="who-overlay" id="whoOverlay" hidden>
+        <div class="who-card">
+            <h2>¿Quién sos?</h2>
+            <p>Elegí el equipo que vas a configurar. Podés cambiarlo después desde arriba.</p>
+            <div class="who-options" id="whoOptions"></div>
+            <button type="button" class="who-dismiss" id="whoDismiss" hidden>Cancelar</button>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const chip = document.getElementById('whoChip');
+            const overlay = document.getElementById('whoOverlay');
+            const options = document.getElementById('whoOptions');
+            const dismiss = document.getElementById('whoDismiss');
+            const YEAR = 60 * 60 * 24 * 365;
+
+            function current() { return window.copilotDevice(); }
+
+            function choose(device) {
+                document.cookie = 'copilot_device=' + encodeURIComponent(device) +
+                    '; path=/; max-age=' + YEAR + '; samesite=lax';
+                // El nav server-side depende de la cookie: recargar para reflejarlo.
+                window.location.reload();
+            }
+
+            function openOverlay(canCancel) {
+                dismiss.hidden = !canCancel;
+                overlay.hidden = false;
+            }
+
+            chip.addEventListener('click', () => openOverlay(true));
+            dismiss.addEventListener('click', () => { overlay.hidden = true; });
+            overlay.addEventListener('click', event => {
+                if (event.target === overlay && !dismiss.hidden) overlay.hidden = true;
+            });
+
+            fetch('/devices')
+                .then(response => response.json())
+                .then(data => {
+                    const devices = (data.devices || []).filter(Boolean);
+                    if (!devices.length) return;
+
+                    options.innerHTML = '';
+                    devices.forEach(device => {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.textContent = device;
+                        if (device !== current()) button.classList.add('ghost');
+                        button.addEventListener('click', () => choose(device));
+                        options.appendChild(button);
+                    });
+
+                    if (current() && devices.includes(current())) {
+                        chip.textContent = current();
+                        chip.hidden = false;
+                    } else {
+                        openOverlay(false);
+                    }
+                })
+                .catch(() => { /* el backend puede estar arrancando */ });
+        })();
+    </script>
 </body>
 </html>

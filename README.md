@@ -217,15 +217,19 @@ identifica con la cabecera `X-Device-Name`, que se completa una vez en el portal
 cautivo ("Nombre de este equipo") y tiene que coincidir con lo que espera el
 panel (`DEVICE_NAMES` en `.env`, por defecto `franco,josefina`).
 
-Cada equipo tiene su **propio perfil**, editable por separado desde el panel con
-el selector de equipo arriba de `/device` y `/personality`:
+Al entrar al panel se elige **quién sos**; queda guardado en una cookie y se
+cambia después desde el botón de arriba a la derecha. El equipo elegido manda la
+config que se ve en `/device` y `/personality`.
+
+Cada equipo tiene su **propio perfil**:
 
 - Luces, color, brillo, pantalla e imagen de reposo.
 - Personalidad del asistente de voz.
 - `rag_enabled`: si está apagado, ese equipo sólo le habla a Gemini (con control
   de luces y videollamadas), sin recuperar contexto del vault ni generar
-  capturas/tareas por voz. `RAG_DISABLED_DEVICES` en `.env` fija el valor inicial
-  (por defecto Franco arranca sin notas/RAG).
+  capturas/tareas por voz. Además la sección **Notas** ni aparece en el panel
+  para ese equipo. `RAG_DISABLED_DEVICES` en `.env` fija el valor inicial (por
+  defecto Franco arranca sin notas/RAG); se puede cambiar desde `/personality`.
 
 El historial de conversación de voz también es por equipo. El vault de notas
 (`/notes`, `/process-notes`) es único y compartido.

@@ -1,15 +1,4 @@
 <section class="card">
-    <div class="row" style="border:0;padding:0">
-        <div class="row-label">Equipo
-            <span>Cada ESP (Franco, Josefina…) se configura por separado.</span>
-        </div>
-        <div class="row-control">
-            <select id="deviceSelect" aria-label="Equipo a configurar"></select>
-        </div>
-    </div>
-</section>
-
-<section class="card">
     <div class="card-head">
         <h2>Salidas</h2>
         <p>Cada salida se prende y se apaga por separado. El ESP32 sondea estos valores cada 5 segundos.</p>
@@ -99,21 +88,9 @@
     let currentConfig = null;
     let images = [];
 
-    const DEVICE_KEY = 'copilot_device';
-    let currentDevice = localStorage.getItem(DEVICE_KEY) || '';
-    const withDevice = path => path + (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(currentDevice);
-
-    async function loadDevices() {
-        const select = document.getElementById('deviceSelect');
-        let devices = [];
-        try {
-            devices = (await (await fetch('/devices')).json()).devices || [];
-        } catch (error) { /* el backend puede estar arrancando */ }
-        if (!devices.length) devices = ['default'];
-        if (!currentDevice || !devices.includes(currentDevice)) currentDevice = devices[0];
-        select.innerHTML = devices.map(d => '<option value="' + d + '">' + d + '</option>').join('');
-        select.value = currentDevice;
-    }
+    // Equipo elegido en la barra de arriba ("quién sos").
+    const withDevice = path =>
+        path + (path.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(window.copilotDevice());
 
     function setStatus(id, message, state) {
         const node = document.getElementById(id);
@@ -240,11 +217,5 @@
     document.getElementById('rgbBrightness').addEventListener('change', event =>
         saveConfig({ rgb_brightness: Number(event.target.value) }, 'statusConfig'));
 
-    document.getElementById('deviceSelect').addEventListener('change', event => {
-        currentDevice = event.target.value;
-        localStorage.setItem(DEVICE_KEY, currentDevice);
-        loadConfig();
-    });
-
-    loadDevices().then(loadConfig).then(loadImages);
+    loadConfig().then(loadImages);
 </script>

@@ -1,15 +1,4 @@
 <section class="card">
-    <div class="row" style="border:0;padding:0">
-        <div class="row-label">Equipo
-            <span>Cada ESP (Franco, Josefina…) tiene su propia personalidad.</span>
-        </div>
-        <div class="row-control">
-            <select id="deviceSelect" aria-label="Equipo a configurar"></select>
-        </div>
-    </div>
-</section>
-
-<section class="card">
     <div class="card-head">
         <h2>Instrucción de sistema</h2>
         <p>
@@ -23,7 +12,7 @@
     </div>
     <div class="row">
         <div class="row-label">Notas y memoria (RAG)
-            <span>Si está apagado, el equipo sólo le habla a Gemini: sin buscar en el vault ni guardar capturas por voz.</span>
+            <span>Si está apagado, el equipo sólo le habla a Gemini: sin buscar en el vault ni guardar capturas por voz. Con RAG apagado, la sección de Notas no aparece para este equipo.</span>
         </div>
         <div class="row-control">
             <label class="switch"><input type="checkbox" id="ragEnabled"><span class="slider"></span></label>
@@ -38,8 +27,6 @@
 
 <script>
     const DEFAULT_PERSONALITY = __DEFAULT_PERSONALITY__;
-    const DEVICE_KEY = 'copilot_device';
-    let currentDevice = localStorage.getItem(DEVICE_KEY) || '';
 
     const personalityText = document.getElementById('personalityText');
     const ragEnabled = document.getElementById('ragEnabled');
@@ -52,25 +39,16 @@
         else delete personalityStatus.dataset.state;
     }
 
-    async function loadDevices() {
-        const select = document.getElementById('deviceSelect');
-        let devices = [];
-        try {
-            devices = (await (await fetch('/devices')).json()).devices || [];
-        } catch (error) { /* el backend puede estar arrancando */ }
-        if (!devices.length) devices = ['default'];
-        if (!currentDevice || !devices.includes(currentDevice)) currentDevice = devices[0];
-        select.innerHTML = devices.map(d => '<option value="' + d + '">' + d + '</option>').join('');
-        select.value = currentDevice;
-    }
+    let loadedRag = true;
 
     async function loadProfile() {
-        setStatus('');
+        const device = window.copilotDevice();
         try {
-            const response = await fetch('/device/config/full?device=' + encodeURIComponent(currentDevice));
+            const response = await fetch('/device/config/full?device=' + encodeURIComponent(device));
             const config = await response.json();
             personalityText.value = config.personality || '';
-            ragEnabled.checked = config.rag_enabled !== false;
+            loadedRag = config.rag_enabled !== false;
+            ragEnabled.checked = loadedRag;
         } catch (error) {
             setStatus('No se pudo cargar la configuración del equipo.', 'error');
         }
@@ -81,6 +59,8 @@
             setStatus('La personalidad no puede quedar vacía.', 'error');
             return;
         }
+        const device = window.copilotDevice();
+        const navChanges = ragEnabled.checked !== loadedRag;
         saveButton.disabled = true;
         setStatus('Guardando…');
         try {
@@ -88,15 +68,19 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    device: currentDevice,
+                    device: device,
                     personality_text: personalityText.value,
                     rag_enabled: ragEnabled.checked
                 })
             });
-            setStatus(
-                response.ok ? 'Configuración de «' + currentDevice + '» actualizada.' : 'Error al actualizar.',
-                response.ok ? 'ok' : 'error'
-            );
+            if (!response.ok) {
+                setStatus('Error al actualizar.', 'error');
+                return;
+            }
+            setStatus('Configuración de «' + device + '» actualizada.', 'ok');
+            loadedRag = ragEnabled.checked;
+            // El nav (mostrar u ocultar Notas) se decide server-side según el flag.
+            if (navChanges) setTimeout(() => window.location.reload(), 600);
         } catch (error) {
             setStatus('No se pudo contactar al backend.', 'error');
         } finally {
@@ -104,17 +88,11 @@
         }
     }
 
-    document.getElementById('deviceSelect').addEventListener('change', event => {
-        currentDevice = event.target.value;
-        localStorage.setItem(DEVICE_KEY, currentDevice);
-        loadProfile();
-    });
-
     saveButton.addEventListener('click', save);
     document.getElementById('resetButton').addEventListener('click', () => {
         personalityText.value = DEFAULT_PERSONALITY;
         setStatus('Texto restaurado. Acordate de guardar.');
     });
 
-    loadDevices().then(loadProfile);
+    loadProfile();
 </script>
