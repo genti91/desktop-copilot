@@ -35,6 +35,10 @@
 
         * { box-sizing: border-box; }
 
+        /* Un display: en una clase le gana a la regla del navegador para
+           [hidden]; sin esto, ocultar por atributo no surte efecto. */
+        [hidden] { display: none !important; }
+
         body {
             margin: 0;
             background: var(--bg);
