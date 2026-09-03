@@ -213,8 +213,12 @@ void loop() {
   const size_t porWakeWord = wakeWordCapturedBytes();
   if (porWakeWord > 0) {
     normalizeRecording(porWakeWord);
-    sendAudioAndPlayResponse(porWakeWord);
-    wakeWordResume();
+    // La ventana de seguimiento se abre solo si el equipo llego a contestar. Si
+    // no hubo respuesta —el backend descarto la grabacion, o fallo la red—
+    // abrirla igual es dejar el microfono servido para el proximo ruido, sin
+    // que nadie haya empezado una conversacion.
+    if (sendAudioAndPlayResponse(porWakeWord)) wakeWordResume();
+    else wakeWordListenAgain();
   }
 
   // Llamada entrante detectada en el último sondeo de /device/config.
