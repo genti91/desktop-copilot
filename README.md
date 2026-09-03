@@ -241,9 +241,18 @@ El historial de conversación de voz también es por equipo. El vault de notas
 
 ### Lámparas de la habitación (Tuya y WiZ)
 
-Cada lámpara se define en `.env` como Tuya (`TUYA_LAMPS`, vía `tinytuya`) o WiZ
-(`WIZ_LAMPS`, vía `pywizlight` — sólo nombre e IP, sin claves). Para el asistente
-son todas iguales: `controlar_lampara_habitacion` con el nombre de la lámpara.
+Cada lámpara se define en `.env` como Tuya (`TUYA_LAMPS`) o WiZ (`WIZ_LAMPS`).
+Para el asistente son iguales: `controlar_lampara_habitacion` con el nombre de la
+lámpara. La diferencia es **quién le habla a la lámpara**:
+
+- **Tuya**: la controla el Pi por LAN con `tinytuya`. La lámpara tiene que estar
+  en la misma red que el Pi (sirve para las lámparas de donde vive el Pi).
+- **WiZ**: la controla el ESP. El backend arma un comando `WIZ:<ip>:<params>` y
+  lo manda en la cabecera `X-Action`; el ESP —que sí está en la red de la
+  lámpara— le manda el paquete UDP (protocolo WiZ, puerto 38899). Sirve para las
+  lámparas de un ESP remoto, que nunca están en la red del Pi. Sólo hace falta
+  nombre e IP (de la app WiZ o del router); ninguna clave. Necesita el firmware
+  1.3.0 o más nuevo.
 
 Para que cada uno controle sólo las suyas, agregá `"equipos": ["josefina"]` a la
 lámpara (sin ese campo la ve cualquier equipo con `lamps_enabled`). Ejemplo: las

@@ -6,6 +6,5 @@ httpx
 pillow
 python-dotenv
 python-multipart
-pywizlight
 tinytuya
 uvicorn[standard]

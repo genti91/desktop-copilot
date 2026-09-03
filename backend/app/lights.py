@@ -11,13 +11,16 @@ Dos destinos, misma interfaz para el modelo:
   mini-sintaxis que ya entiende ``commands.cpp`` (``LED_RGB:r,g,b``,
   ``LED_BRIGHTNESS:v``, ``FILAMENT_ON/OFF``, ``ALL_OFF``) y ``main.py`` la manda
   en la cabecera ``X-Action`` de la respuesta de voz.
-- ``controlar_lampara_habitacion``: las lámparas de la habitación por LAN. Cada
-  lámpara es Tuya (tinytuya) o WiZ (pywizlight), pero para el modelo son todas
-  iguales: sólo elige el nombre. Cada lámpara puede limitarse a ciertos equipos
-  con su campo ``equipos``.
+- ``controlar_lampara_habitacion``: las lámparas de la habitación. Cada lámpara
+  es Tuya o WiZ, pero para el modelo son iguales: sólo elige el nombre.
+    * Tuya: la controla el Pi por LAN con tinytuya (tiene que estar en la misma
+      red que el Pi).
+    * WiZ: la controla el ESP. El backend arma un comando ``WIZ:<ip>:<params>``
+      y lo manda en ``X-Action``; el ESP —que sí está en la red de la lámpara—
+      le manda el paquete UDP (protocolo WiZ, puerto 38899).
+  Cada lámpara puede limitarse a ciertos equipos con su campo ``equipos``.
 """
 
-import asyncio
 from typing import Optional
 
 from google.genai import types
@@ -28,11 +31,6 @@ try:  # tinytuya sólo hace falta en el Pi; los tests y el arranque no deben dep
     import tinytuya
 except ImportError:  # pragma: no cover - depende del entorno
     tinytuya = None
-
-try:  # idem pywizlight, para las lámparas WiZ.
-    from pywizlight import PilotBuilder, wizlight
-except ImportError:  # pragma: no cover - depende del entorno
-    PilotBuilder = wizlight = None
 
 
 ESP_TOOL = "controlar_asistente_escritorio"
@@ -311,49 +309,49 @@ def _aplicar_tuya(nombre: str, args: dict) -> str:
     return _frase_lampara(nombre, encender, rgb, brillo)
 
 
-# --- WiZ (pywizlight, UDP asíncrono) -------------------------------------- #
+# --- WiZ (comando UDP que ejecuta el ESP) -------------------------------- #
+
+WIZ_PORT = 38899
 
 
-async def _wiz_apply(ip: str, encender, rgb, brillo) -> None:
-    bulb = wizlight(ip)
-    try:
-        if encender is False and rgb is None and brillo is None:
-            await bulb.turn_off()
-            return
-        params: dict = {}
-        if rgb:
-            params["rgb"] = rgb
-        if brillo is not None:
-            params["brightness"] = max(1, min(255, round(int(brillo) * 255 / 100)))
-        await bulb.turn_on(PilotBuilder(**params) if params else PilotBuilder())
-    finally:
-        await bulb.async_close()
-
-
-def _aplicar_wiz(nombre: str, especificacion: dict, args: dict) -> str:
-    if wizlight is None:
-        return f"no puedo con la lámpara {nombre}: falta pywizlight en el servidor"
-
+def _wiz_command(ip: str, args: dict) -> str:
+    """Arma ``WIZ:<ip>:<k=v,...>`` para la cabecera X-Action. El ESP lo traduce
+    a un ``{"method":"setPilot","params":{...}}`` y lo manda por UDP."""
     encender = args.get("encender")
     rgb = _parse_rgb(args.get("color_rgb"))
     brillo = args.get("brillo")
 
-    try:
-        asyncio.run(_wiz_apply(especificacion["ip"], encender, rgb, brillo))
-    except Exception as error:  # noqa: BLE001 - la lámpara puede estar offline
-        print(f"[WiZ] {nombre}: {type(error).__name__}: {error}")
-        return f"no pude conectar con la lámpara {nombre}"
+    if encender is False and rgb is None and brillo is None:
+        params = ["state=0"]
+    else:
+        params = ["state=1"]
+        if rgb:
+            params += [f"r={rgb[0]}", f"g={rgb[1]}", f"b={rgb[2]}"]
+        if brillo is not None:
+            try:
+                params.append(f"dimming={max(10, min(100, int(brillo)))}")
+            except (TypeError, ValueError):
+                pass
+    return f"WIZ:{ip}:{','.join(params)}"
 
-    return _frase_lampara(nombre, encender, rgb, brillo)
+
+def _aplicar_wiz(nombre: str, especificacion: dict, args: dict, pending_esp: list[str]) -> str:
+    ip = especificacion.get("ip")
+    if not ip:
+        return f"no encontré la lámpara {nombre}"
+    pending_esp.append(_wiz_command(ip, args))
+    return _frase_lampara(
+        nombre, args.get("encender"), _parse_rgb(args.get("color_rgb")), args.get("brillo")
+    )
 
 
-def _aplicar_lampara(args: dict) -> str:
+def _aplicar_lampara(args: dict, pending_esp: list[str]) -> str:
     nombre = str(args.get("lampara", "")).strip().lower()
     especificacion = _lamparas.get(nombre)
     if especificacion is None:
         return f"no encontré la lámpara {nombre or 'que me pediste'}"
     if especificacion["tipo"] == "wiz":
-        return _aplicar_wiz(nombre, especificacion, args)
+        return _aplicar_wiz(nombre, especificacion, args, pending_esp)
     return _aplicar_tuya(nombre, args)
 
 
@@ -377,6 +375,6 @@ def aplicar_accion_luz(
         if nombre in _lamparas and not (lamps_enabled and nombre in lamp_names_for(device)):
             print(f"[Luces] {nombre} fuera del alcance de {device or 'sin equipo'}; se ignora.")
             return ""
-        return _aplicar_lampara(args)
+        return _aplicar_lampara(args, pending_esp)
     print(f"[Luces] función desconocida: {name}")
     return ""

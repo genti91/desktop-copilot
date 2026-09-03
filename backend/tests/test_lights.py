@@ -117,23 +117,30 @@ def test_tuya_offline_lamp_does_not_raise(monkeypatch, velador_tuya):
 
 
 # --------------------------------------------------------------------------- #
-# Lámparas de la habitación: WiZ (pywizlight, UDP asíncrono)
+# Lámparas de la habitación: WiZ (comando UDP que ejecuta el ESP)
 # --------------------------------------------------------------------------- #
 
 
-def test_wiz_lamp_dispatches_to_pywizlight(monkeypatch):
+def test_wiz_lamp_queues_an_x_action_command_for_the_esp():
     lights.registrar_lamparas([], [{"nombre": "wizled", "ip": "10.0.0.9"}])
-    llamadas = []
-
-    async def _fake_apply(ip, encender, rgb, brillo):
-        llamadas.append((ip, encender, rgb, brillo))
-
-    monkeypatch.setattr(lights, "_wiz_apply", _fake_apply)
+    pending: list[str] = []
     frase = lights.aplicar_accion_luz(
-        lights.LAMP_TOOL, {"lampara": "wizled", "color_rgb": "0,0,255"}, []
+        lights.LAMP_TOOL,
+        {"lampara": "wizled", "encender": True, "color_rgb": "0,0,255", "brillo": 80},
+        pending,
     )
-    assert llamadas == [("10.0.0.9", None, (0, 0, 255), None)]
+    assert pending == ["WIZ:10.0.0.9:state=1,r=0,g=0,b=255,dimming=80"]
     assert "wizled" in frase.lower()
+
+
+def test_wiz_turn_off_is_a_single_state_command():
+    lights.registrar_lamparas([], [{"nombre": "wizled", "ip": "10.0.0.9"}])
+    pending: list[str] = []
+    frase = lights.aplicar_accion_luz(
+        lights.LAMP_TOOL, {"lampara": "wizled", "encender": False}, pending
+    )
+    assert pending == ["WIZ:10.0.0.9:state=0"]
+    assert "apagué" in frase.lower()
 
 
 # --------------------------------------------------------------------------- #

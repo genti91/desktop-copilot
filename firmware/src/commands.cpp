@@ -1,4 +1,8 @@
+// WiFi.h primero: ver la nota en backend.h sobre el orden de los includes.
+#include <WiFi.h>
+
 #include <Arduino.h>
+#include <WiFiUdp.h>
 #include <Adafruit_NeoPixel.h>
 #include "commands.h"
 #include "device_config.h"
@@ -6,6 +10,46 @@
 #include "videocall.h"
 
 namespace {
+
+// Puerto del protocolo local de WiZ. El backend (que no está en la red de la
+// lámpara) manda "WIZ:<ip>:<k=v,...>" en X-Action y este ESP —que sí lo está—
+// le pega el setPilot por UDP.
+constexpr uint16_t WIZ_PORT = 38899;
+
+void sendWizCommand(const String& spec) {
+  int colon = spec.indexOf(':');
+  if (colon < 0) return;
+  IPAddress addr;
+  if (!addr.fromString(spec.substring(0, colon))) return;
+  String params = spec.substring(colon + 1);
+
+  String json = "{\"method\":\"setPilot\",\"params\":{";
+  bool first = true;
+  int start = 0;
+  while (start < params.length()) {
+    int comma = params.indexOf(',', start);
+    if (comma < 0) comma = params.length();
+    String pair = params.substring(start, comma);
+    int eq = pair.indexOf('=');
+    if (eq > 0) {
+      String key = pair.substring(0, eq);
+      String value = pair.substring(eq + 1);
+      if (!first) json += ",";
+      first = false;
+      if (key == "state") json += "\"state\":" + String(value == "1" ? "true" : "false");
+      else json += "\"" + key + "\":" + value;  // r, g, b, dimming: numéricos
+    }
+    start = comma + 1;
+  }
+  json += "}}";
+
+  WiFiUDP udp;
+  udp.beginPacket(addr, WIZ_PORT);
+  udp.print(json);
+  udp.endPacket();
+  Serial.println("💡 WiZ -> " + spec.substring(0, colon) + " " + json);
+}
+
 uint8_t currentRed = 255;
 uint8_t currentGreen = 42;
 uint8_t currentBlue = 0;
@@ -131,6 +175,9 @@ void executeDeviceCommand(String command) {
       // La llamada la levanta loop() cuando termina de sonar la respuesta: acá
       // sólo se anota a quién.
       requestVideoCall(singleCommand.substring(5));
+    } else if (singleCommand.startsWith("WIZ:")) {
+      // Lámpara WiZ de la habitación: fire-and-forget, no toca las salidas propias.
+      sendWizCommand(singleCommand.substring(4));
     }
 
     startIndex = pipeIndex + 1;
