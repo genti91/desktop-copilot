@@ -148,7 +148,7 @@
 
         label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
 
-        textarea, input[type="text"], input[type="number"], input[type="file"] {
+        textarea, input[type="text"], input[type="number"], input[type="file"], select {
             width: 100%;
             background: var(--surface-2);
             color: var(--text);
@@ -159,6 +159,8 @@
             font-size: 14px;
             transition: border-color .15s, box-shadow .15s;
         }
+
+        select { width: auto; min-width: 150px; cursor: pointer; }
 
         textarea { min-height: 168px; resize: vertical; line-height: 1.6; }
 

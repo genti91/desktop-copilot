@@ -31,10 +31,15 @@ def data_dir(tmp_path, monkeypatch):
     uploads.mkdir()
     firmware.mkdir()
 
+    devices = tmp_path / "devices"
+    devices.mkdir()
+
     monkeypatch.setattr(device, "DATA_DIR", tmp_path)
     monkeypatch.setattr(device, "UPLOADS_DIR", uploads)
     monkeypatch.setattr(device, "FIRMWARE_DIR", firmware)
-    monkeypatch.setattr(device, "CONFIG_PATH", tmp_path / "device_config.json")
+    monkeypatch.setattr(device, "DEVICES_DIR", devices)
+    monkeypatch.setattr(device, "KNOWN_PATH", devices / "known.json")
+    monkeypatch.setattr(device, "LEGACY_CONFIG_PATH", tmp_path / "device_config.json")
     monkeypatch.setattr(device, "FIRMWARE_BINARY", firmware / "firmware.bin")
     monkeypatch.setattr(device, "MANIFEST_PATH", firmware / "manifest.json")
     device._raw_cache.clear()

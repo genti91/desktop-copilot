@@ -46,6 +46,22 @@ SESSION_HOURS = int(os.getenv("SESSION_HOURS", "720"))
 DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "")
 TRUSTED_NETWORKS = os.getenv("TRUSTED_NETWORKS", "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12")
 
+
+def _device_list(raw: str) -> list[str]:
+    return [name.strip().lower() for name in raw.split(",") if name.strip()]
+
+
+# Cada ESP se identifica con la cabecera X-Device-Name (la completa en el portal
+# cautivo). Cada equipo tiene su propio perfil: luces, imagen, personalidad y si
+# usa notas/RAG. DEVICE_NAMES es la semilla del selector del panel; cualquier
+# equipo que aparezca sondeando se agrega solo.
+DEVICE_NAMES = _device_list(os.getenv("DEVICE_NAMES", "franco,josefina"))
+
+# Equipos que arrancan SIN notas ni RAG: sólo le hablan a Gemini (con luces y
+# videollamadas), sin recuperar contexto del vault ni generar capturas. Es sólo
+# el valor inicial del perfil; después se cambia desde /personality.
+RAG_DISABLED_DEVICES = _device_list(os.getenv("RAG_DISABLED_DEVICES", "franco"))
+
 # Lámparas Tuya de la habitación, controladas por LAN con tinytuya. El asistente
 # de voz las prende/apaga y les cambia el color por function calling.
 #

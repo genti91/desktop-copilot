@@ -16,6 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
 
+from . import config
 from .call import incoming_call_for
 from .config import BASE_DIR
 from .models import DeviceConfig, DeviceConfigUpdate, DeviceImage, FirmwareManifest
@@ -32,7 +33,13 @@ DEFAULT_IMAGES_DIR = BASE_DIR / "app" / "assets" / "default_images"
 DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "images"
 FIRMWARE_DIR = DATA_DIR / "firmware"
-CONFIG_PATH = DATA_DIR / "device_config.json"
+# Un perfil por equipo: data/devices/<nombre>.json. El archivo viejo (una sola
+# config compartida) se lee como base para migrar sin perder nada.
+DEVICES_DIR = DATA_DIR / "devices"
+KNOWN_PATH = DEVICES_DIR / "known.json"
+LEGACY_CONFIG_PATH = DATA_DIR / "device_config.json"
+DEFAULT_DEVICE = "default"
+DEVICE_NAME_PATTERN = re.compile(r"[^a-z0-9_-]")
 FIRMWARE_BINARY = FIRMWARE_DIR / "firmware.bin"
 MANIFEST_PATH = FIRMWARE_DIR / "manifest.json"
 
@@ -49,34 +56,122 @@ _raw_cache: dict[tuple[str, int, int], bytes] = {}
 def _ensure_dirs() -> None:
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     FIRMWARE_DIR.mkdir(parents=True, exist_ok=True)
+    DEVICES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def load_config() -> DeviceConfig:
-    if not CONFIG_PATH.exists():
-        return DeviceConfig(updated_at=_now())
-    try:
-        return DeviceConfig(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
-    except Exception as error:
-        print(f"[Device Config Load Error]: {error}")
-        return DeviceConfig(updated_at=_now())
+def safe_device(name: Optional[str]) -> str:
+    """Normaliza el nombre de equipo (cabecera X-Device-Name o query param)."""
+    cleaned = DEVICE_NAME_PATTERN.sub("", (name or "").strip().lower())[:32]
+    return cleaned or DEFAULT_DEVICE
 
 
-def save_config(config: DeviceConfig) -> DeviceConfig:
+def _config_path(device: str) -> Path:
+    return DEVICES_DIR / f"{safe_device(device)}.json"
+
+
+def load_config(device: str = DEFAULT_DEVICE) -> DeviceConfig:
+    device = safe_device(device)
+    path = _config_path(device)
+    if path.exists():
+        try:
+            return DeviceConfig(**json.loads(path.read_text(encoding="utf-8")))
+        except Exception as error:
+            print(f"[Device Config Load Error] {device}: {error}")
+            return DeviceConfig(updated_at=_now())
+
+    # Migración: el archivo viejo era una sola config compartida. Se hereda como
+    # base (revisión incluida) para que el firmware no vea un salto hacia atrás.
+    if LEGACY_CONFIG_PATH.exists():
+        try:
+            inherited = DeviceConfig(**json.loads(LEGACY_CONFIG_PATH.read_text(encoding="utf-8")))
+            return inherited.model_copy(
+                update={"rag_enabled": device not in config.RAG_DISABLED_DEVICES}
+            )
+        except Exception as error:
+            print(f"[Device Config Migrate Error] {device}: {error}")
+
+    return DeviceConfig(
+        rag_enabled=device not in config.RAG_DISABLED_DEVICES,
+        updated_at=_now(),
+    )
+
+
+def save_config(cfg: DeviceConfig, device: str = DEFAULT_DEVICE) -> DeviceConfig:
     _ensure_dirs()
-    temporary = CONFIG_PATH.with_suffix(".tmp")
-    temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
-    temporary.replace(CONFIG_PATH)
-    return config
+    path = _config_path(device)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    temporary.replace(path)
+    return cfg
 
 
 def _bump(config: DeviceConfig, **changes) -> DeviceConfig:
     return config.model_copy(
         update={**changes, "revision": config.revision + 1, "updated_at": _now()}
     )
+
+
+# --------------------------------------------------------------------------- #
+# Registro de equipos conocidos (para el selector del panel)
+# --------------------------------------------------------------------------- #
+
+
+def known_devices() -> list[str]:
+    """Equipos que el panel ofrece: semilla del .env + vistos + con perfil."""
+    names = set(config.DEVICE_NAMES)
+    if KNOWN_PATH.exists():
+        try:
+            names.update(safe_device(n) for n in json.loads(KNOWN_PATH.read_text(encoding="utf-8")))
+        except Exception as error:
+            print(f"[Device Registry Load Error]: {error}")
+    if DEVICES_DIR.is_dir():
+        names.update(p.stem for p in DEVICES_DIR.glob("*.json") if p.stem != "known")
+    names.discard(DEFAULT_DEVICE)
+    return sorted(names) or [DEFAULT_DEVICE]
+
+
+def remember_device(name: str) -> None:
+    """Agrega un equipo visto sondeando al registro, si es nuevo."""
+    device = safe_device(name)
+    if device == DEFAULT_DEVICE:
+        return
+    current = set(known_devices())
+    if device in current:
+        return
+    _ensure_dirs()
+    KNOWN_PATH.write_text(json.dumps(sorted(current | {device})), encoding="utf-8")
+
+
+def update_profile(device: str, changes: dict) -> DeviceConfig:
+    """Valida y guarda un cambio parcial en el perfil de un equipo.
+
+    Comparte la validación entre POST /device/config y POST /update-personality.
+    El catálogo de imágenes es global, así que `image_id` se valida acá igual.
+    """
+    config_now = load_config(device)
+    changes = dict(changes)
+    clear_image = changes.pop("clear_image", False)
+
+    if changes.get("rgb_color") is not None:
+        if not HEX_COLOR_PATTERN.match(changes["rgb_color"]):
+            raise HTTPException(status_code=400, detail="El color debe ser hexadecimal #RRGGBB.")
+        changes["rgb_color"] = "#" + changes["rgb_color"].lstrip("#").upper()
+
+    if clear_image:
+        changes["image_id"] = None
+    elif changes.get("image_id"):
+        _require_image_path(changes["image_id"])
+
+    applied = {
+        key: value
+        for key, value in changes.items()
+        if value is not None or key == "image_id"
+    }
+    return save_config(_bump(config_now, **applied), device)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,39 +347,28 @@ def device_state_payload(config: DeviceConfig, incoming_from: Optional[str] = No
     return payload
 
 
+@router.get("/devices")
+def get_devices():
+    """Equipos que el panel ofrece en el selector."""
+    return {"devices": known_devices()}
+
+
 @router.get("/device/config")
 def get_device_config(request: Request):
-    device_name = (request.headers.get("X-Device-Name") or "").strip().lower()
-    return device_state_payload(load_config(), incoming_call_for(device_name))
+    device = safe_device(request.headers.get("X-Device-Name"))
+    remember_device(device)
+    return device_state_payload(load_config(device), incoming_call_for(device))
 
 
 @router.get("/device/config/full", response_model=DeviceConfig)
-def get_device_config_full():
-    return load_config()
+def get_device_config_full(device: str = DEFAULT_DEVICE):
+    return load_config(device)
 
 
 @router.post("/device/config", response_model=DeviceConfig)
-def update_device_config(payload: DeviceConfigUpdate):
-    config = load_config()
+def update_device_config(payload: DeviceConfigUpdate, device: str = DEFAULT_DEVICE):
     changes = payload.model_dump(exclude_unset=True)
-    changes.pop("clear_image", None)
-
-    if changes.get("rgb_color") is not None:
-        if not HEX_COLOR_PATTERN.match(changes["rgb_color"]):
-            raise HTTPException(status_code=400, detail="El color debe ser hexadecimal #RRGGBB.")
-        changes["rgb_color"] = "#" + changes["rgb_color"].lstrip("#").upper()
-
-    if payload.clear_image:
-        changes["image_id"] = None
-    elif changes.get("image_id"):
-        _require_image_path(changes["image_id"])
-
-    applied = {
-        key: value
-        for key, value in changes.items()
-        if value is not None or key == "image_id"
-    }
-    return save_config(_bump(config, **applied))
+    return update_profile(device, changes)
 
 
 # --------------------------------------------------------------------------- #
@@ -321,11 +405,11 @@ def get_image_raw(image_id: str):
 
 
 @router.get("/device/image")
-def get_active_image_raw():
-    config = load_config()
-    if not config.image_id or _image_path(config.image_id) is None:
+def get_active_image_raw(request: Request):
+    cfg = load_config(safe_device(request.headers.get("X-Device-Name")))
+    if not cfg.image_id or _image_path(cfg.image_id) is None:
         raise HTTPException(status_code=404, detail="No hay imagen seleccionada.")
-    return get_image_raw(config.image_id)
+    return get_image_raw(cfg.image_id)
 
 
 @router.post("/device/images", response_model=DeviceImage)
@@ -359,9 +443,11 @@ def delete_device_image(image_id: str):
         raise HTTPException(status_code=404, detail="La imagen no existe.")
 
     path.unlink()
-    config = load_config()
-    if config.image_id == image_id:
-        save_config(_bump(config, image_id=None))
+    # El catálogo es global: sacar la imagen de cualquier perfil que la use.
+    for device in [DEFAULT_DEVICE, *known_devices()]:
+        cfg = load_config(device)
+        if cfg.image_id == image_id:
+            save_config(_bump(cfg, image_id=None), device)
     return {"status": "deleted", "id": image_id}
 
 

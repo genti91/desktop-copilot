@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import pages
-from app.state import DEFAULT_PERSONALITY, state_memory
+from app.state import DEFAULT_PERSONALITY
 
 PAGES = {
     "/notes": "Notas de reunión",
@@ -48,14 +48,16 @@ def test_legacy_dashboard_and_root_redirect_to_notes(client):
         assert response.headers["location"] == "/notes"
 
 
-def test_personality_page_shows_current_value_escaped(client):
-    state_memory["assistant_personality"] = 'Sos <b>directo</b> & "conciso"'
-    try:
-        body = client.get("/personality").text
-        assert "Sos &lt;b&gt;directo&lt;/b&gt; &amp; &quot;conciso&quot;" in body
-        assert "<b>directo</b>" not in body
-    finally:
-        state_memory["assistant_personality"] = DEFAULT_PERSONALITY
+def test_personality_page_has_device_selector_and_loads_by_fetch(client):
+    body = client.get("/personality").text
+    # La personalidad ya no se renderiza server-side: se elige el equipo y se
+    # trae su perfil por fetch.
+    assert 'id="deviceSelect"' in body
+    assert "/devices" in body
+    assert "/device/config/full?device=" in body
+    assert "/update-personality" in body
+    # El toggle de notas/RAG vive en esta página.
+    assert 'id="ragEnabled"' in body
 
 
 def test_personality_default_is_injected_as_a_js_literal(client):

@@ -2,6 +2,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .state import DEFAULT_PERSONALITY
+
 
 class ActionItem(BaseModel):
     task: str
@@ -38,6 +40,8 @@ class NotesPayload(BaseModel):
 
 class PersonalityPayload(BaseModel):
     personality_text: str
+    device: str = "default"
+    rag_enabled: Optional[bool] = None
 
 
 class DeviceImage(BaseModel):
@@ -57,6 +61,10 @@ class DeviceConfig(BaseModel):
     filament_enabled: bool = True
     display_enabled: bool = True
     image_id: Optional[str] = None
+    # Personalidad del asistente de voz y si este equipo usa notas/RAG. Viven en
+    # el perfil del dispositivo para que cada ESP se configure por separado.
+    personality: str = DEFAULT_PERSONALITY
+    rag_enabled: bool = True
     updated_at: str = ""
 
 
@@ -70,6 +78,8 @@ class DeviceConfigUpdate(BaseModel):
     display_enabled: Optional[bool] = None
     image_id: Optional[str] = None
     clear_image: bool = False
+    personality: Optional[str] = None
+    rag_enabled: Optional[bool] = None
 
 
 class FirmwareManifest(BaseModel):

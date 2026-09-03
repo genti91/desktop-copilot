@@ -180,15 +180,22 @@ En el primer arranque:
   - Multipart con `file` (audio) y `session_id`.
   - Devuelve `audio/mpeg` + header `X-Action` para hardware.
 - `POST /update-personality`
-  - Permite cambiar personalidad del asistente.
+  - Body JSON: `{"device": "franco", "personality_text": "...", "rag_enabled": true}`.
+    Cambia la personalidad y el flag de notas/RAG del equipo indicado.
 - `GET /notes`, `GET /personality`, `GET /device`, `GET /firmware`
   - Las cuatro secciones del panel. `GET /` y `GET /dashboard` redirigen a `/notes`.
+- `GET /devices`
+  - `{"devices": [...]}` para el selector de equipo del panel.
 - `GET /device/config`
-  - Vista compacta que sondea el ESP32 cada 5 s. Trae `revision`, estado de cada
-    salida, color/brillo del RGB y la imagen activa con su checksum.
-- `POST /device/config`
+  - Vista compacta que sondea el ESP32 cada 5 s. Usa la cabecera `X-Device-Name`
+    para servir el perfil de ese equipo. Trae `revision`, estado de cada salida,
+    color/brillo del RGB y la imagen activa con su checksum.
+- `GET /device/config/full?device=<nombre>`
+  - Perfil completo del equipo (incluye `personality` y `rag_enabled`). Lo usa el panel.
+- `POST /device/config?device=<nombre>`
   - Actualizacion parcial (`rgb_enabled`, `rgb_color`, `rgb_brightness`,
-    `filament_enabled`, `display_enabled`, `image_id`, `clear_image`).
+    `filament_enabled`, `display_enabled`, `image_id`, `clear_image`,
+    `personality`, `rag_enabled`).
     Cada cambio sube `revision`, que es lo que dispara el refresco en el firmware.
 - `GET /device/images` / `POST /device/images` / `DELETE /device/images/{id}`
   - Catalogo, subida y borrado de imagenes. Todo se normaliza a 240x240.
@@ -202,6 +209,26 @@ En el primer arranque:
   - Binario publicado.
 - `GET /ota/sync` / `POST /ota/sync[?force=true]`
   - Estado del espejado desde GitHub y disparo manual.
+
+## Configuracion por equipo
+
+Puede haber varios ESP (ej. uno de Franco y otro de Josefina). Cada uno se
+identifica con la cabecera `X-Device-Name`, que se completa una vez en el portal
+cautivo ("Nombre de este equipo") y tiene que coincidir con lo que espera el
+panel (`DEVICE_NAMES` en `.env`, por defecto `franco,josefina`).
+
+Cada equipo tiene su **propio perfil**, editable por separado desde el panel con
+el selector de equipo arriba de `/device` y `/personality`:
+
+- Luces, color, brillo, pantalla e imagen de reposo.
+- Personalidad del asistente de voz.
+- `rag_enabled`: si está apagado, ese equipo sólo le habla a Gemini (con control
+  de luces y videollamadas), sin recuperar contexto del vault ni generar
+  capturas/tareas por voz. `RAG_DISABLED_DEVICES` en `.env` fija el valor inicial
+  (por defecto Franco arranca sin notas/RAG).
+
+El historial de conversación de voz también es por equipo. El vault de notas
+(`/notes`, `/process-notes`) es único y compartido.
 
 ## Configuracion del dispositivo
 

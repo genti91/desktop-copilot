@@ -6,7 +6,6 @@ navegación de `templates/layout.html`. El render es sustitución de tokens
 de plantillas.
 """
 
-import html
 import json
 
 from fastapi import APIRouter
@@ -14,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .auth import auth_enabled
 from .config import BASE_DIR
-from .state import DEFAULT_PERSONALITY, state_memory
+from .state import DEFAULT_PERSONALITY
 
 TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 
@@ -74,8 +73,7 @@ def personality_page():
     return render_page(
         "personality",
         "Personalidad",
-        "Cómo habla el asistente cuando le respondés por voz.",
-        personality=html.escape(state_memory["assistant_personality"]),
+        "Cómo habla el asistente de cada equipo y si usa notas/RAG.",
         # Va dentro de un <script>, donde las entidades HTML no se decodifican.
         default_personality=json.dumps(DEFAULT_PERSONALITY),
     )

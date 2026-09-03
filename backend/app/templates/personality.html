@@ -1,4 +1,15 @@
 <section class="card">
+    <div class="row" style="border:0;padding:0">
+        <div class="row-label">Equipo
+            <span>Cada ESP (Franco, Josefina…) tiene su propia personalidad.</span>
+        </div>
+        <div class="row-control">
+            <select id="deviceSelect" aria-label="Equipo a configurar"></select>
+        </div>
+    </div>
+</section>
+
+<section class="card">
     <div class="card-head">
         <h2>Instrucción de sistema</h2>
         <p>
@@ -8,18 +19,30 @@
     </div>
     <div class="field">
         <label for="personalityText">Personalidad</label>
-        <textarea id="personalityText">__PERSONALITY__</textarea>
+        <textarea id="personalityText"></textarea>
+    </div>
+    <div class="row">
+        <div class="row-label">Notas y memoria (RAG)
+            <span>Si está apagado, el equipo sólo le habla a Gemini: sin buscar en el vault ni guardar capturas por voz.</span>
+        </div>
+        <div class="row-control">
+            <label class="switch"><input type="checkbox" id="ragEnabled"><span class="slider"></span></label>
+        </div>
     </div>
     <div class="actions">
-        <button type="button" id="saveButton">Guardar personalidad</button>
-        <button type="button" class="ghost" id="resetButton">Restaurar por defecto</button>
+        <button type="button" id="saveButton">Guardar</button>
+        <button type="button" class="ghost" id="resetButton">Restaurar personalidad por defecto</button>
     </div>
     <div id="statusPersonality" class="status" role="status"></div>
 </section>
 
 <script>
     const DEFAULT_PERSONALITY = __DEFAULT_PERSONALITY__;
+    const DEVICE_KEY = 'copilot_device';
+    let currentDevice = localStorage.getItem(DEVICE_KEY) || '';
+
     const personalityText = document.getElementById('personalityText');
+    const ragEnabled = document.getElementById('ragEnabled');
     const personalityStatus = document.getElementById('statusPersonality');
     const saveButton = document.getElementById('saveButton');
 
@@ -29,7 +52,31 @@
         else delete personalityStatus.dataset.state;
     }
 
-    async function updatePersonality() {
+    async function loadDevices() {
+        const select = document.getElementById('deviceSelect');
+        let devices = [];
+        try {
+            devices = (await (await fetch('/devices')).json()).devices || [];
+        } catch (error) { /* el backend puede estar arrancando */ }
+        if (!devices.length) devices = ['default'];
+        if (!currentDevice || !devices.includes(currentDevice)) currentDevice = devices[0];
+        select.innerHTML = devices.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+        select.value = currentDevice;
+    }
+
+    async function loadProfile() {
+        setStatus('');
+        try {
+            const response = await fetch('/device/config/full?device=' + encodeURIComponent(currentDevice));
+            const config = await response.json();
+            personalityText.value = config.personality || '';
+            ragEnabled.checked = config.rag_enabled !== false;
+        } catch (error) {
+            setStatus('No se pudo cargar la configuración del equipo.', 'error');
+        }
+    }
+
+    async function save() {
         if (!personalityText.value.trim()) {
             setStatus('La personalidad no puede quedar vacía.', 'error');
             return;
@@ -40,10 +87,14 @@
             const response = await fetch('/update-personality', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ personality_text: personalityText.value })
+                body: JSON.stringify({
+                    device: currentDevice,
+                    personality_text: personalityText.value,
+                    rag_enabled: ragEnabled.checked
+                })
             });
             setStatus(
-                response.ok ? 'Personalidad actualizada.' : 'Error al actualizar.',
+                response.ok ? 'Configuración de «' + currentDevice + '» actualizada.' : 'Error al actualizar.',
                 response.ok ? 'ok' : 'error'
             );
         } catch (error) {
@@ -53,9 +104,17 @@
         }
     }
 
-    saveButton.addEventListener('click', updatePersonality);
+    document.getElementById('deviceSelect').addEventListener('change', event => {
+        currentDevice = event.target.value;
+        localStorage.setItem(DEVICE_KEY, currentDevice);
+        loadProfile();
+    });
+
+    saveButton.addEventListener('click', save);
     document.getElementById('resetButton').addEventListener('click', () => {
         personalityText.value = DEFAULT_PERSONALITY;
         setStatus('Texto restaurado. Acordate de guardar.');
     });
+
+    loadDevices().then(loadProfile);
 </script>

@@ -16,7 +16,7 @@ from .config import (
     MAX_HISTORY_MESSAGES,
     VAULT_WATCH_ENABLED,
 )
-from .device import router as device_router
+from .device import load_config, router as device_router, safe_device, update_profile
 from .integrations import collection, generate_speech_bytes, gemini, groq, voice_models
 from .lights import (
     aplicar_accion_luz,
@@ -102,8 +102,12 @@ async def voice_assistant(
     session_id: str = Form("esp32_session"),
 ):
     audio_bytes = await file.read()
-    sessions.setdefault(session_id, [])
     caller_name = (request.headers.get("X-Device-Name") or "").strip().lower()
+    # Cada equipo tiene su perfil (personalidad, notas/RAG) y su propio historial.
+    device = safe_device(caller_name)
+    profile = load_config(device)
+    session_key = f"{session_id}:{device}"
+    sessions.setdefault(session_key, [])
 
     if gemini is None:
         # El ESP32 reproduce lo que le devuelvan, así que le contestamos hablando
@@ -128,25 +132,31 @@ async def voice_assistant(
         except Exception as error:
             print(f"[Groq STT Error]: {error}")
 
-    context_text = _retrieve_context(user_text)
+    capabilities = "controlar las luces de su escritorio"
+    notes_block = ""
+    if profile.rag_enabled:
+        capabilities = "recordar notas de reuniones y " + capabilities
+        notes_block = f"""
+    [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
+    Usa esta información para responder sus dudas sobre proyectos. En las tareas,
+    "- [x]" es una tarea ya hecha y "- []" una pendiente; si están todas en "- [x]"
+    ese proyecto no tiene nada pendiente.
+    {_retrieve_context(user_text)}
+    """
+
     system_instruction = f"""
-    {state_memory["assistant_personality"]}
-    Sos capaz de recordar notas de reuniones y controlar las luces de su escritorio.
+    {profile.personality}
+    Sos capaz de {capabilities}.
 
     {tools_prompt()}
 
     [VIDEOLLAMADA]
     Si te piden llamar a alguien ("llamá a Franco", "videollamada con Jose"), usá
     la función {CALL_TOOL} con el nombre en minúsculas. Avisá que estás llamando.
-
-    [INFORMACIÓN RECUPERADA DE NOTAS/REUNIONES]
-    Usa esta información para responder sus dudas sobre proyectos. En las tareas,
-    "- [x]" es una tarea ya hecha y "- []" una pendiente; si están todas en "- [x]"
-    ese proyecto no tiene nada pendiente.
-    {context_text}
+    {notes_block}
     """
     current_user_message = f"Usuario: {user_text or '[Audio inaudible]'}"
-    gemini_contents = [system_instruction, *sessions[session_id], current_user_message]
+    gemini_contents = [system_instruction, *sessions[session_key], current_user_message]
 
     # Function calling MANUAL: una sola llamada al modelo. Si en la respuesta
     # viene un function_call, lo ejecutamos acá y hablamos una confirmación
@@ -209,8 +219,8 @@ async def voice_assistant(
             response_text = limpio
         break
 
-    sessions[session_id].extend([current_user_message, f"Asistente: {response_text}"])
-    sessions[session_id] = sessions[session_id][-(MAX_HISTORY_MESSAGES * 2):]
+    sessions[session_key].extend([current_user_message, f"Asistente: {response_text}"])
+    sessions[session_key] = sessions[session_key][-(MAX_HISTORY_MESSAGES * 2):]
 
     # Red por si un modelo ignora las funciones y escribe [CMD:...] en el texto.
     comandos_texto = re.findall(r"\[CMD:(.*?)\]", response_text, re.IGNORECASE)
@@ -219,7 +229,7 @@ async def voice_assistant(
     acciones = pending_esp + [comando.strip().upper() for comando in comandos_texto]
     action_command = "|".join(accion for accion in acciones if accion) or "NONE"
 
-    if user_text and background_tasks:
+    if user_text and background_tasks and profile.rag_enabled:
         background_tasks.add_task(
             extract_and_save_data,
             user_text,
@@ -255,5 +265,13 @@ def _retrieve_context(user_text: str) -> str:
 
 @app.post("/update-personality")
 def update_personality(payload: PersonalityPayload):
-    state_memory["assistant_personality"] = payload.personality_text
-    return {"status": "success", "current_personality": state_memory["assistant_personality"]}
+    changes: dict = {"personality": payload.personality_text}
+    if payload.rag_enabled is not None:
+        changes["rag_enabled"] = payload.rag_enabled
+    profile = update_profile(payload.device, changes)
+    return {
+        "status": "success",
+        "device": safe_device(payload.device),
+        "current_personality": profile.personality,
+        "rag_enabled": profile.rag_enabled,
+    }

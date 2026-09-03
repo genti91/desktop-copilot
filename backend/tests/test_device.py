@@ -1,4 +1,5 @@
 import hashlib
+import json
 from io import BytesIO
 
 from PIL import Image
@@ -66,7 +67,7 @@ def test_config_update_persists_and_bumps_revision(client, data_dir):
     assert response.json()["rgb_color"] == "#00FF80"
     assert response.json()["revision"] == 2
 
-    assert (data_dir / "device_config.json").exists()
+    assert (data_dir / "devices" / "default.json").exists()
     payload = client.get("/device/config").json()
     assert payload["rgb"] == {"enabled": True, "r": 0, "g": 255, "b": 128, "brightness": 120}
     assert payload["filament"]["enabled"] is False
@@ -92,6 +93,62 @@ def test_incoming_call_shows_up_in_config_for_the_callee(client):
         "/device/config", headers={"X-Device-Name": "franco"}
     ).json()
     call._incoming.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Perfil por dispositivo
+# --------------------------------------------------------------------------- #
+
+
+def test_devices_keep_separate_configs(client):
+    client.post("/device/config?device=franco", json={"rgb_color": "#FF0000"})
+    client.post("/device/config?device=josefina", json={"rgb_color": "#0000FF"})
+
+    franco = client.get("/device/config", headers={"X-Device-Name": "franco"}).json()
+    josefina = client.get("/device/config", headers={"X-Device-Name": "Josefina"}).json()
+    assert (franco["rgb"]["r"], franco["rgb"]["b"]) == (255, 0)
+    assert (josefina["rgb"]["r"], josefina["rgb"]["b"]) == (0, 255)
+
+    # Un equipo sin tocar sigue en el default de fábrica.
+    other = client.get("/device/config", headers={"X-Device-Name": "otro"}).json()
+    assert other["rgb"] == {"enabled": True, "r": 255, "g": 42, "b": 0, "brightness": 70}
+
+
+def test_legacy_shared_config_is_inherited_by_each_device(client, data_dir):
+    device.LEGACY_CONFIG_PATH.write_text(
+        json.dumps({"revision": 7, "rgb_color": "#123456", "filament_enabled": False}),
+        encoding="utf-8",
+    )
+    payload = client.get("/device/config", headers={"X-Device-Name": "franco"}).json()
+    assert payload["revision"] == 7
+    assert (payload["rgb"]["r"], payload["rgb"]["g"], payload["rgb"]["b"]) == (18, 52, 86)
+    assert payload["filament"]["enabled"] is False
+
+
+def test_devices_endpoint_lists_seed_and_seen(client):
+    client.get("/device/config", headers={"X-Device-Name": "nuevo-equipo"})
+    devices = client.get("/devices").json()["devices"]
+    assert "nuevo-equipo" in devices
+    # La semilla del .env (DEVICE_NAMES) también aparece.
+    assert {"franco", "josefina"}.issubset(set(devices))
+
+
+def test_new_device_starts_without_rag_when_listed_in_rag_disabled(client, monkeypatch):
+    monkeypatch.setattr(device.config, "RAG_DISABLED_DEVICES", ["franco"])
+    assert client.get("/device/config/full?device=franco").json()["rag_enabled"] is False
+    assert client.get("/device/config/full?device=josefina").json()["rag_enabled"] is True
+
+
+def test_deleting_a_catalog_image_clears_it_on_every_device(client):
+    uploaded = client.post(
+        "/device/images", files={"file": ("shared.png", png_bytes(), "image/png")}
+    ).json()["id"]
+    client.post("/device/config?device=franco", json={"image_id": uploaded})
+    client.post("/device/config?device=josefina", json={"image_id": uploaded})
+
+    assert client.delete(f"/device/images/{uploaded}").status_code == 200
+    assert client.get("/device/config", headers={"X-Device-Name": "franco"}).json()["image"] is None
+    assert client.get("/device/config", headers={"X-Device-Name": "josefina"}).json()["image"] is None
 
 
 def test_outputs_toggle_independently(client):

@@ -191,3 +191,34 @@ print("OK")
 """
     result = run_without_ai_keys(script)
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+
+
+def test_voice_skips_notes_and_rag_when_the_device_has_it_disabled():
+    """El ESP de Franco: sólo Gemini + luces, sin recuperar notas ni guardar capturas."""
+    script = FAKE_GEMINI_HARNESS + """
+from app.models import DeviceConfig
+
+calls = {"retrieve": 0, "extract": 0}
+main._retrieve_context = lambda text: (calls.__setitem__("retrieve", calls["retrieve"] + 1), "")[1]
+main.extract_and_save_data = lambda *a, **k: calls.__setitem__("extract", calls["extract"] + 1)
+main.load_config = lambda device="default": DeviceConfig(rag_enabled=False, personality="Sos breve.")
+
+with patch.object(main, "gemini", FakeGemini([
+    FakePart(text="Listo, led verde."),
+    FakePart(function_call=FakeCall("controlar_asistente_escritorio", {"color_rgb": "0,255,0"})),
+])), patch.object(main, "generate_speech_bytes", fake_tts):
+    client = TestClient(main.app)
+    response = client.post(
+        "/voice-assistant",
+        files={"file": ("a.wav", b"RIFFfake", "audio/wav")},
+        data={"session_id": "t"},
+        headers={"X-Device-Name": "franco"},
+    )
+
+assert response.status_code == 200, response.status_code
+assert response.headers["x-action"] == "LED_RGB:0,255,0", response.headers["x-action"]
+assert calls == {"retrieve": 0, "extract": 0}, calls
+print("OK")
+"""
+    result = run_without_ai_keys(script)
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
