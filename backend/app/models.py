@@ -42,6 +42,7 @@ class PersonalityPayload(BaseModel):
     personality_text: str
     device: str = "default"
     rag_enabled: Optional[bool] = None
+    tuya_enabled: Optional[bool] = None
 
 
 class DeviceImage(BaseModel):
@@ -61,10 +62,11 @@ class DeviceConfig(BaseModel):
     filament_enabled: bool = True
     display_enabled: bool = True
     image_id: Optional[str] = None
-    # Personalidad del asistente de voz y si este equipo usa notas/RAG. Viven en
+    # Personalidad del asistente de voz y qué puede hacer este equipo. Viven en
     # el perfil del dispositivo para que cada ESP se configure por separado.
     personality: str = DEFAULT_PERSONALITY
     rag_enabled: bool = True
+    tuya_enabled: bool = True
     updated_at: str = ""
 
 
@@ -80,6 +82,7 @@ class DeviceConfigUpdate(BaseModel):
     clear_image: bool = False
     personality: Optional[str] = None
     rag_enabled: Optional[bool] = None
+    tuya_enabled: Optional[bool] = None
 
 
 class FirmwareManifest(BaseModel):

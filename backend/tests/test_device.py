@@ -139,6 +139,16 @@ def test_new_device_starts_without_rag_when_listed_in_rag_disabled(client, monke
     assert client.get("/device/config/full?device=josefina").json()["rag_enabled"] is True
 
 
+def test_tuya_control_follows_the_allowlist(client, monkeypatch):
+    monkeypatch.setattr(device.config, "TUYA_DEVICES", ["franco"])
+    assert client.get("/device/config/full?device=franco").json()["tuya_enabled"] is True
+    assert client.get("/device/config/full?device=josefina").json()["tuya_enabled"] is False
+
+    # El toggle del panel pisa el default y persiste.
+    client.post("/device/config?device=josefina", json={"tuya_enabled": True})
+    assert client.get("/device/config/full?device=josefina").json()["tuya_enabled"] is True
+
+
 def test_deleting_a_catalog_image_clears_it_on_every_device(client):
     uploaded = client.post(
         "/device/images", files={"file": ("shared.png", png_bytes(), "image/png")}

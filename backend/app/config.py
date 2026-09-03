@@ -62,6 +62,11 @@ DEVICE_NAMES = _device_list(os.getenv("DEVICE_NAMES", "franco,josefina"))
 # el valor inicial del perfil; después se cambia desde /personality.
 RAG_DISABLED_DEVICES = _device_list(os.getenv("RAG_DISABLED_DEVICES", "franco"))
 
+# Equipos cuyo asistente de voz puede controlar las lámparas Tuya de la
+# habitación (lista blanca). Los demás siguen manejando sólo sus propias luces.
+# Es sólo el valor inicial del perfil; después se cambia desde /personality.
+TUYA_DEVICES = _device_list(os.getenv("TUYA_DEVICES", "franco"))
+
 # Lámparas Tuya de la habitación, controladas por LAN con tinytuya. El asistente
 # de voz las prende/apaga y les cambia el color por function calling.
 #

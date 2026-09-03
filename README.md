@@ -180,10 +180,11 @@ En el primer arranque:
   - Multipart con `file` (audio) y `session_id`.
   - Devuelve `audio/mpeg` + header `X-Action` para hardware.
 - `POST /update-personality`
-  - Body JSON: `{"device": "franco", "personality_text": "...", "rag_enabled": true}`.
-    Cambia la personalidad y el flag de notas/RAG del equipo indicado.
+  - Body JSON: `{"device": "franco", "personality_text": "...", "rag_enabled": true, "tuya_enabled": true}`.
+    Cambia la personalidad y los flags de notas/RAG y lámparas Tuya del equipo.
 - `GET /notes`, `GET /personality`, `GET /device`, `GET /firmware`
-  - Las cuatro secciones del panel. `GET /` y `GET /dashboard` redirigen a `/notes`.
+  - Las secciones del panel. `GET /` y `GET /dashboard` redirigen a la primera
+    útil (`/notes`, o `/personality` si el equipo no usa notas).
 - `GET /devices`
   - `{"devices": [...]}` para el selector de equipo del panel.
 - `GET /device/config`
@@ -191,11 +192,12 @@ En el primer arranque:
     para servir el perfil de ese equipo. Trae `revision`, estado de cada salida,
     color/brillo del RGB y la imagen activa con su checksum.
 - `GET /device/config/full?device=<nombre>`
-  - Perfil completo del equipo (incluye `personality` y `rag_enabled`). Lo usa el panel.
+  - Perfil completo del equipo (incluye `personality`, `rag_enabled` y
+    `tuya_enabled`). Lo usa el panel.
 - `POST /device/config?device=<nombre>`
   - Actualizacion parcial (`rgb_enabled`, `rgb_color`, `rgb_brightness`,
     `filament_enabled`, `display_enabled`, `image_id`, `clear_image`,
-    `personality`, `rag_enabled`).
+    `personality`, `rag_enabled`, `tuya_enabled`).
     Cada cambio sube `revision`, que es lo que dispara el refresco en el firmware.
 - `GET /device/images` / `POST /device/images` / `DELETE /device/images/{id}`
   - Catalogo, subida y borrado de imagenes. Todo se normaliza a 240x240.
@@ -230,6 +232,10 @@ Cada equipo tiene su **propio perfil**:
   capturas/tareas por voz. Además la sección **Notas** ni aparece en el panel
   para ese equipo. `RAG_DISABLED_DEVICES` en `.env` fija el valor inicial (por
   defecto Franco arranca sin notas/RAG); se puede cambiar desde `/personality`.
+- `tuya_enabled`: si está apagado, el asistente de ese equipo no controla las
+  lámparas Tuya de la habitación (sus propias luces sí). `TUYA_DEVICES` en `.env`
+  es la lista blanca inicial (por defecto sólo Franco); se cambia desde
+  `/personality`.
 
 El historial de conversación de voz también es por equipo. El vault de notas
 (`/notes`, `/process-notes`) es único y compartido.

@@ -18,6 +18,14 @@
             <label class="switch"><input type="checkbox" id="ragEnabled"><span class="slider"></span></label>
         </div>
     </div>
+    <div class="row">
+        <div class="row-label">Lámparas de la habitación (Tuya)
+            <span>Si está apagado, el asistente de este equipo no puede prender, apagar ni cambiarle el color a las lámparas Tuya de la habitación. Sus propias luces (LED, filamento) las maneja igual.</span>
+        </div>
+        <div class="row-control">
+            <label class="switch"><input type="checkbox" id="tuyaEnabled"><span class="slider"></span></label>
+        </div>
+    </div>
     <div class="actions">
         <button type="button" id="saveButton">Guardar</button>
         <button type="button" class="ghost" id="resetButton">Restaurar personalidad por defecto</button>
@@ -30,6 +38,7 @@
 
     const personalityText = document.getElementById('personalityText');
     const ragEnabled = document.getElementById('ragEnabled');
+    const tuyaEnabled = document.getElementById('tuyaEnabled');
     const personalityStatus = document.getElementById('statusPersonality');
     const saveButton = document.getElementById('saveButton');
 
@@ -49,6 +58,7 @@
             personalityText.value = config.personality || '';
             loadedRag = config.rag_enabled !== false;
             ragEnabled.checked = loadedRag;
+            tuyaEnabled.checked = config.tuya_enabled !== false;
         } catch (error) {
             setStatus('No se pudo cargar la configuración del equipo.', 'error');
         }
@@ -70,7 +80,8 @@
                 body: JSON.stringify({
                     device: device,
                     personality_text: personalityText.value,
-                    rag_enabled: ragEnabled.checked
+                    rag_enabled: ragEnabled.checked,
+                    tuya_enabled: tuyaEnabled.checked
                 })
             });
             if (!response.ok) {

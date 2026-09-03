@@ -96,7 +96,7 @@ def personality_page(request: Request):
     return render_page(
         "personality",
         "Personalidad",
-        "Cómo habla el asistente de este equipo y si usa notas/RAG.",
+        "Cómo habla el asistente de este equipo y qué puede hacer.",
         request,
         # Va dentro de un <script>, donde las entidades HTML no se decodifican.
         default_personality=json.dumps(DEFAULT_PERSONALITY),

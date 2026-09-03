@@ -88,16 +88,19 @@ def load_config(device: str = DEFAULT_DEVICE) -> DeviceConfig:
     if LEGACY_CONFIG_PATH.exists():
         try:
             inherited = DeviceConfig(**json.loads(LEGACY_CONFIG_PATH.read_text(encoding="utf-8")))
-            return inherited.model_copy(
-                update={"rag_enabled": device not in config.RAG_DISABLED_DEVICES}
-            )
+            return inherited.model_copy(update=_capability_defaults(device))
         except Exception as error:
             print(f"[Device Config Migrate Error] {device}: {error}")
 
-    return DeviceConfig(
-        rag_enabled=device not in config.RAG_DISABLED_DEVICES,
-        updated_at=_now(),
-    )
+    return DeviceConfig(updated_at=_now(), **_capability_defaults(device))
+
+
+def _capability_defaults(device: str) -> dict:
+    """Valor inicial de los flags de capacidad para un equipo sin perfil aún."""
+    return {
+        "rag_enabled": device not in config.RAG_DISABLED_DEVICES,
+        "tuya_enabled": device in config.TUYA_DEVICES,
+    }
 
 
 def save_config(cfg: DeviceConfig, device: str = DEFAULT_DEVICE) -> DeviceConfig:

@@ -133,6 +133,33 @@ def test_tuya_tool_appears_with_lamp_names_as_enum():
     assert "velador" in lights.tools_prompt()
 
 
+def test_tuya_tool_is_withheld_from_a_device_without_permission():
+    lights.registrar_lamparas(
+        [{"nombre": "Velador", "id": "a", "key": "b", "ip": "1.2.3.4"}]
+    )
+    declaraciones = [d.name for d in lights.build_light_tools(tuya=False)[0].function_declarations]
+    assert declaraciones == [lights.ESP_TOOL]
+    assert lights.TUYA_TOOL not in lights.tools_prompt(tuya=False)
+    # Con permiso (default) sí aparece.
+    assert lights.TUYA_TOOL in {d.name for d in lights.build_light_tools()[0].function_declarations}
+
+
+def test_tuya_call_from_a_device_without_permission_is_a_no_op(monkeypatch):
+    called = False
+
+    def _boom(_nombre):
+        nonlocal called
+        called = True
+        raise AssertionError("no debería tocar la lámpara")
+
+    monkeypatch.setattr(lights, "_bulb", _boom)
+    frase = lights.aplicar_accion_luz(
+        lights.TUYA_TOOL, {"lampara": "velador", "encender": True}, [], allow_tuya=False
+    )
+    assert frase == ""
+    assert called is False
+
+
 def test_registrar_skips_incomplete_lamps():
     lights.registrar_lamparas(
         [

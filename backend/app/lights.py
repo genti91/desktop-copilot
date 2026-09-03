@@ -120,27 +120,28 @@ def _tuya_declaration(nombres: list[str]) -> types.FunctionDeclaration:
     )
 
 
-def light_declarations() -> list[types.FunctionDeclaration]:
-    """Las declaraciones de luces. La de Tuya sólo si hay lámparas configuradas."""
+def light_declarations(tuya: bool = True) -> list[types.FunctionDeclaration]:
+    """Las declaraciones de luces. La de Tuya sólo si hay lámparas configuradas
+    y el equipo tiene permiso (`tuya`)."""
     declaraciones = [_esp_declaration()]
-    if LAMP_NAMES:
+    if tuya and LAMP_NAMES:
         declaraciones.append(_tuya_declaration(LAMP_NAMES))
     return declaraciones
 
 
-def build_light_tools() -> list[types.Tool]:
+def build_light_tools(tuya: bool = True) -> list[types.Tool]:
     """Las tools para pasarle a generate_content. La de Tuya sólo si hay lámparas."""
-    return [types.Tool(function_declarations=light_declarations())]
+    return [types.Tool(function_declarations=light_declarations(tuya))]
 
 
-def tools_prompt() -> str:
+def tools_prompt(tuya: bool = True) -> str:
     """Bloque para el system prompt: qué funciones hay y cuándo usarlas."""
     lineas = [
         "[CONTROL DE LUCES]",
         "Tenés funciones para las luces. Llamalas SÓLO si te lo piden explícitamente:",
         f"- {ESP_TOOL}: LED RGB, filamento y apagado del asistente de escritorio.",
     ]
-    if LAMP_NAMES:
+    if tuya and LAMP_NAMES:
         lineas.append(
             f"- {TUYA_TOOL}: las lámparas de la habitación ({', '.join(LAMP_NAMES)})."
         )
@@ -263,11 +264,18 @@ def _aplicar_tuya(args: dict) -> str:
     return f"listo con la lámpara {nombre}"
 
 
-def aplicar_accion_luz(name: str, args: dict, pending_esp: list[str]) -> str:
+def aplicar_accion_luz(
+    name: str, args: dict, pending_esp: list[str], allow_tuya: bool = True
+) -> str:
     """Ejecuta un function_call del modelo. Devuelve una frase de confirmación."""
     if name == ESP_TOOL:
         return _aplicar_esp(args or {}, pending_esp)
     if name == TUYA_TOOL:
+        # Defensa: el equipo sin permiso ni siquiera recibe la declaración, pero
+        # si un modelo la inventa igual, no se toca la lámpara.
+        if not allow_tuya:
+            print("[Luces] llamada a Tuya de un equipo sin permiso; se ignora.")
+            return ""
         return _aplicar_tuya(args or {})
     print(f"[Luces] función desconocida: {name}")
     return ""

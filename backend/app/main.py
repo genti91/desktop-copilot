@@ -148,7 +148,7 @@ async def voice_assistant(
     {profile.personality}
     Sos capaz de {capabilities}.
 
-    {tools_prompt()}
+    {tools_prompt(profile.tuya_enabled)}
 
     [VIDEOLLAMADA]
     Si te piden llamar a alguien ("llamá a Franco", "videollamada con Jose"), usá
@@ -164,7 +164,11 @@ async def voice_assistant(
     # haría el modo automático (para que el modelo reaccione al resultado) no
     # vale la pena: el control de luces es fire-and-forget.
     pending_esp: list[str] = []
-    tools = [types.Tool(function_declarations=light_declarations() + [call_declaration()])]
+    tools = [
+        types.Tool(
+            function_declarations=light_declarations(profile.tuya_enabled) + [call_declaration()]
+        )
+    ]
     sin_auto_fc = types.AutomaticFunctionCallingConfig(disable=True)
 
     # Cualquier error pasa al siguiente modelo, sin distinguir el tipo: un 503 y
@@ -203,7 +207,7 @@ async def voice_assistant(
                     frase = aplicar_accion_llamada(args, pending_esp, caller_name)
                 else:
                     frase = await asyncio.to_thread(
-                        aplicar_accion_luz, llamada.name, args, pending_esp
+                        aplicar_accion_luz, llamada.name, args, pending_esp, profile.tuya_enabled
                     )
             except Exception as error:
                 print(f"[Tool] {llamada.name} falló ({type(error).__name__}: {error}).")
@@ -268,10 +272,13 @@ def update_personality(payload: PersonalityPayload):
     changes: dict = {"personality": payload.personality_text}
     if payload.rag_enabled is not None:
         changes["rag_enabled"] = payload.rag_enabled
+    if payload.tuya_enabled is not None:
+        changes["tuya_enabled"] = payload.tuya_enabled
     profile = update_profile(payload.device, changes)
     return {
         "status": "success",
         "device": safe_device(payload.device),
         "current_personality": profile.personality,
         "rag_enabled": profile.rag_enabled,
+        "tuya_enabled": profile.tuya_enabled,
     }
