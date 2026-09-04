@@ -33,45 +33,12 @@ constexpr uint32_t MAXIMO_DE_GRABACION_MS = 8000;
 // y despertar al backend para eso son diez segundos de espera al pedo.
 constexpr uint32_t MINIMO_DE_VOZ_MS = 400;
 
-// Cuanto se espera a que la persona EMPIECE a hablar despues de decir "Jarvis".
-// Es distinto del silencio que corta la frase: es normal tomarse un segundo para
-// pensar que se va a pedir, y con el umbral de corte se cancelaba solo.
+// Cuanto se espera a que la persona EMPIECE a hablar. Es distinto del silencio
+// que corta la frase: despues de decir "Jarvis" es normal tomarse un segundo
+// para pensar que se va a pedir, y con el umbral de corte se cancelaba solo.
+// Tambien es la ventana de seguimiento: al terminar la respuesta se queda
+// escuchando este rato para poder contestarle sin repetir la palabra.
 constexpr uint32_t ESPERA_A_QUE_HABLE_MS = 5000;
-
-// La ventana de seguimiento —la que se abre sola al terminar de contestar, para
-// poder repreguntar sin decir "Jarvis" otra vez— es mucho mas corta y mas
-// exigente que la de arriba, y por un motivo: ahi hubo una palabra de activacion
-// de por medio, o sea alguien que decidio hablarle. Aca no hay ninguna senal de
-// que le esten hablando, asi que cada segundo que queda abierta es un segundo en
-// el que cualquier ruido del ambiente se puede llevar el turno.
-constexpr uint32_t ESPERA_SEGUIMIENTO_MS = 2000;
-constexpr uint32_t MINIMO_DE_VOZ_SEGUIMIENTO_MS = 700;
-
-// El VAD dice "esto tiene forma de voz", no "esto te lo estan diciendo a vos":
-// una conversacion de fondo, la tele o un golpe seco lo activan igual. El filtro
-// que los separa es el nivel: quien le habla al equipo esta cerca del microfono
-// y destaca sobre el ambiente; lo de fondo se queda pegado al piso de ruido.
-//
-// Estos dos umbrales se aplican SOLO en la ventana de seguimiento, y no despues
-// de "Jarvis". El costo de equivocarse no es el mismo en los dos lados: en el
-// seguimiento, rechazar de mas cuesta volver a decir la palabra, mientras que
-// aceptar de mas es el equipo hablando solo. Despues de "Jarvis" es al reves
-// —alguien acaba de pedirle algo explicitamente— y ahi un umbral mal calibrado
-// dejaria el camino principal sin contestar.
-//
-// 9 dB son unas 3 veces la amplitud.
-constexpr float MARGEN_SOBRE_EL_RUIDO_DB = 9.0f;
-
-// Y un tope absoluto, porque el margen solo no alcanza: en una habitacion muy
-// silenciosa el piso se va a -80 dBFS y cualquier crujido queda 20 dB por
-// encima. -60 dBFS es el mismo valor que usa el AFE de fabrica para decidir si
-// una trama tiene energia de voz (AFE_VAD_ENERGY_THRESHOLD_DEFAULT).
-constexpr float NIVEL_MINIMO_DE_VOZ_DBFS = -60.0f;
-
-// Al retomar el microfono, los primeros trozos que devuelve el AFE son los que
-// quedaron en su buffer de antes de la pausa: la cola de la propia respuesta.
-// Sin cancelacion de eco, tomarlos por voz es contestarse a si mismo.
-constexpr uint32_t DESCARTE_AL_RETOMAR_MS = 300;
 
 constexpr size_t BYTES_POR_MS = (SAMPLE_RATE * 2) / 1000;
 
@@ -93,39 +60,6 @@ volatile bool tareasVivas = false;
 uint32_t msGrabados = 0;
 uint32_t msDeSilencio = 0;
 uint32_t msDeVoz = 0;
-uint32_t msPorDescartar = 0;
-
-// Si esta ventana la abrio la respuesta anterior en vez de la palabra de
-// activacion. Lo escribe loop() al despachar, lo lee la tarea de escucha.
-volatile bool enSeguimiento = false;
-
-// Nivel del ambiente y de lo que se esta grabando, los dos en dBFS. El AFE los
-// entrega ya calculados en cada trozo (data_volume), asi que salen gratis.
-float pisoDeRuidoDb = 0.0f;
-bool pisoMedido = false;
-float picoDeVozDb = -120.0f;
-
-// El piso baja rapido y sube despacio a proposito: si alguien enciende un
-// ventilador, que el umbral lo absorba en un segundo; si alguien habla cerca,
-// que su voz no se coma el piso y termine haciendo pasar al ruido siguiente.
-void actualizarPisoDeRuido(float nivelDb) {
-  if (!pisoMedido) {
-    pisoDeRuidoDb = nivelDb;
-    pisoMedido = true;
-    return;
-  }
-  pisoDeRuidoDb += (nivelDb - pisoDeRuidoDb) * (nivelDb < pisoDeRuidoDb ? 0.25f : 0.02f);
-}
-
-// Lo grabado no vale: se tira y se vuelve a esperar "Jarvis". Cerrar la ventana
-// es la mitad del arreglo —dejarla abierta despues de descartar es ofrecerle el
-// turno al proximo ruido, que es justo lo que estabamos evitando—.
-void volverAEscuchar() {
-  setFaceMode(FACE_IDLE);
-  bytesGrabados = 0;
-  enSeguimiento = false;
-  estado = Estado::ESCUCHANDO;
-}
 
 bool escuchaSuspendida() {
   // Mientras suena la respuesta el micrófono capta el parlante. Sin cancelación
@@ -177,7 +111,6 @@ void escucharTask(void* parametro) {
     // pisaba la cara de hablar durante toda la reproduccion.
     if (veniaSuspendida) {
       veniaSuspendida = false;
-      msPorDescartar = DESCARTE_AL_RETOMAR_MS;
       if (estado == Estado::GRABANDO) setFaceMode(FACE_RECORDING);
     }
 
@@ -189,17 +122,6 @@ void escucharTask(void* parametro) {
 
     const uint32_t msDelTrozo = resultado->data_size / BYTES_POR_MS;
 
-    // Los primeros trozos despues de una pausa son la cola de la respuesta que
-    // quedo en el buffer del AFE. No cuentan ni como voz ni como ambiente.
-    if (msPorDescartar > 0) {
-      msPorDescartar = msDelTrozo >= msPorDescartar ? 0 : msPorDescartar - msDelTrozo;
-      continue;
-    }
-
-    const float nivelDb = resultado->data_volume;
-    const bool hayVoz = resultado->vad_state == VAD_SPEECH;
-    if (!hayVoz) actualizarPisoDeRuido(nivelDb);
-
     if (estado == Estado::ESCUCHANDO) {
       if (resultado->wakeup_state == WAKENET_DETECTED) {
         Serial.println("🗣️ \"Jarvis\" detectado, escuchando...");
@@ -209,8 +131,6 @@ void escucharTask(void* parametro) {
         msGrabados = 0;
         msDeSilencio = 0;
         msDeVoz = 0;
-        picoDeVozDb = -120.0f;
-        enSeguimiento = false;
         estado = Estado::GRABANDO;
       }
       continue;
@@ -226,58 +146,32 @@ void escucharTask(void* parametro) {
     }
     msGrabados += msDelTrozo;
 
-    if (hayVoz) {
+    if (resultado->vad_state == VAD_SPEECH) {
       msDeVoz += msDelTrozo;
       msDeSilencio = 0;
-      if (nivelDb > picoDeVozDb) picoDeVozDb = nivelDb;
     } else {
       msDeSilencio += msDelTrozo;
     }
 
-    // La ventana de seguimiento pide mas voz y espera menos: nadie dijo la
-    // palabra de activacion, asi que la duda se resuelve a favor de callarse.
-    const uint32_t minimoDeVoz =
-        enSeguimiento ? MINIMO_DE_VOZ_SEGUIMIENTO_MS : MINIMO_DE_VOZ_MS;
-    const uint32_t esperaAQueHable =
-        enSeguimiento ? ESPERA_SEGUIMIENTO_MS : ESPERA_A_QUE_HABLE_MS;
-
     const bool termino_de_hablar =
-        msDeSilencio >= SILENCIO_PARA_CORTAR_MS && msDeVoz >= minimoDeVoz;
+        msDeSilencio >= SILENCIO_PARA_CORTAR_MS && msDeVoz >= MINIMO_DE_VOZ_MS;
     const bool se_paso_de_largo = msGrabados >= MAXIMO_DE_GRABACION_MS;
     // Se mide contra el total transcurrido, no contra el silencio acumulado: lo
     // que interesa es cuanto lleva la ventana abierta sin que nadie hable.
-    const bool no_dijo_nada = msGrabados >= esperaAQueHable && msDeVoz < minimoDeVoz;
+    const bool no_dijo_nada =
+        msGrabados >= ESPERA_A_QUE_HABLE_MS && msDeVoz < MINIMO_DE_VOZ_MS;
 
     if (no_dijo_nada) {
-      Serial.printf("🤷 %lu ms de ventana sin voz suficiente (%lu ms); vuelvo a escuchar.\n",
-                    (unsigned long)esperaAQueHable, (unsigned long)msDeVoz);
-      volverAEscuchar();
+      Serial.println("🤷 Se activó pero no se dijo nada; vuelvo a escuchar.");
+      setFaceMode(FACE_IDLE);
+      bytesGrabados = 0;
+      estado = Estado::ESCUCHANDO;
       continue;
     }
 
     if (termino_de_hablar || se_paso_de_largo) {
-      // El VAD ya dijo que suena a voz; esto decide si esa voz venia dirigida al
-      // equipo o si es lo que hay en la habitacion. Un pico que apenas asoma
-      // sobre el ambiente es exactamente lo que se escuchaba como "le contesto a
-      // cualquier ruido", y en el seguimiento conviene equivocarse callandose.
-      const float margenDb = picoDeVozDb - pisoDeRuidoDb;
-      const bool destacaSobreElAmbiente = !pisoMedido || margenDb >= MARGEN_SOBRE_EL_RUIDO_DB;
-      const bool hablaronCerca = picoDeVozDb >= NIVEL_MINIMO_DE_VOZ_DBFS;
-
-      if (enSeguimiento && (!destacaSobreElAmbiente || !hablaronCerca)) {
-        Serial.printf("🔇 Seguimiento descartado por ruido: pico %.0f dBFS, piso %.0f, margen %.0f dB.\n",
-                      picoDeVozDb, pisoDeRuidoDb, margenDb);
-        volverAEscuchar();
-        continue;
-      }
-
-      // Los niveles se imprimen siempre, tambien cuando pasa: son los numeros
-      // con los que se calibran los dos umbrales de arriba sin tener que
-      // adivinar como suena esta habitacion.
-      Serial.printf("🛑 Fin de la frase (%lu ms, %s, pico %.0f dBFS, piso %.0f, margen %.0f dB).\n",
-                    (unsigned long)msGrabados,
-                    se_paso_de_largo ? "tope de tiempo" : "silencio",
-                    picoDeVozDb, pisoDeRuidoDb, margenDb);
+      Serial.printf("🛑 Fin de la frase (%lu ms, %s).\n", (unsigned long)msGrabados,
+                    se_paso_de_largo ? "tope de tiempo" : "silencio");
       estado = Estado::LISTA;
     }
   }
@@ -346,10 +240,9 @@ size_t wakeWordCapturedBytes() {
 }
 
 void wakeWordResume() {
-  // Despues de contestar no vuelve a esperar la palabra de activacion: abre una
-  // ventana de seguimiento para poder responderle de una. Dura
-  // ESPERA_SEGUIMIENTO_MS y pide mas voz que la de despues de "Jarvis"; si no se
-  // dice nada, la logica de "no dijo nada" la devuelve sola a escuchar.
+  // Despues de contestar no vuelve a esperar la palabra: abre una ventana de
+  // seguimiento para poder responderle de una. Si en ESPERA_A_QUE_HABLE_MS no
+  // se dice nada, la logica de "no dijo nada" la devuelve sola a escuchar.
   //
   // Las tareas siguen suspendidas mientras suena la respuesta, asi que la
   // ventana empieza a contar recien cuando el audio termina, que es cuando la
@@ -358,16 +251,7 @@ void wakeWordResume() {
   msGrabados = 0;
   msDeSilencio = 0;
   msDeVoz = 0;
-  picoDeVozDb = -120.0f;
-  enSeguimiento = true;
   estado = Estado::GRABANDO;
-}
-
-void wakeWordListenAgain() {
-  if (!tareasVivas) return;
-  bytesGrabados = 0;
-  enSeguimiento = false;
-  estado = Estado::ESCUCHANDO;
 }
 
 void pauseWakeWord() {
@@ -378,5 +262,7 @@ void pauseWakeWord() {
 }
 
 void resumeWakeWord() {
-  wakeWordListenAgain();
+  if (!tareasVivas) return;
+  bytesGrabados = 0;
+  estado = Estado::ESCUCHANDO;
 }

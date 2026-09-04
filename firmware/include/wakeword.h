@@ -19,15 +19,8 @@ bool wakeWordReady();
 // hay ninguna. La grabación vive en pcm_buffer, igual que la del sensor.
 size_t wakeWordCapturedBytes();
 
-// Abre la ventana de seguimiento después de que loop() despachó la grabación y
-// el equipo contestó: se puede repreguntar sin volver a decir "Jarvis".
+// Vuelve a escuchar después de que loop() despachó la grabación.
 void wakeWordResume();
-
-// Cierra la ventana de seguimiento y vuelve a esperar la palabra de activación.
-// La usa loop() cuando el pedido NO terminó en una respuesta hablada: si no
-// hubo nada que contestar, dejar el micrófono abierto es lo que hace que el
-// próximo ruido de la habitación se lleve el turno.
-void wakeWordListenAgain();
 
 // Suelta y retoma el micrófono para que lo use la grabación por sensor táctil.
 void pauseWakeWord();

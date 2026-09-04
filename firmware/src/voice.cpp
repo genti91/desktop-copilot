@@ -241,11 +241,11 @@ void startPlayback(size_t fileSize) {
 
 }  // namespace
 
-bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
+void sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("❌ Sin conexión Wi-Fi.");
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   setFaceMode(FACE_WAITING);
@@ -263,14 +263,14 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   size_t bodyLength = buildMultipartBody(recordedPcmBytes);
   if (bodyLength == 0) {
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   const uint32_t antesLockMs = millis();
   if (!backendLock(NETWORK_LOCK_WAIT_MS)) {
     Serial.println("❌ La red quedó ocupada demasiado tiempo.");
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   HTTPClient http;
@@ -286,7 +286,7 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     Serial.println("❌ Error al preparar el pedido.");
     backendUnlock();
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + BOUNDARY);
@@ -296,29 +296,19 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   const uint32_t antesPedidoMs = millis();
   int status = http.sendRequest("POST", requestBuffer, bodyLength);
   const uint32_t cabeceraMs = millis();
-  // 204: el backend escuchó la grabación y decidió que no le hablaban a él
-  // —ruido, o una de las muletillas que Whisper inventa sobre el silencio—. No
-  // es un error: es el equipo quedándose callado, que es lo que corresponde.
-  if (status == HTTP_CODE_NO_CONTENT) {
-    Serial.println("🔇 El backend no encontró nada que contestar.");
-    http.end();
-    backendUnlock();
-    setFaceMode(FACE_IDLE);
-    return false;
-  }
   if (status != HTTP_CODE_OK) {
     Serial.printf("❌ El backend respondió %d.\n", status);
     http.end();
     backendUnlock();
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   if (!ensureResponseBuffer(RESPONSE_CAPACITY)) {
     http.end();
     backendUnlock();
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
 
   // writeToStream decodifica el chunked si lo hubiera; el destino es memoria.
@@ -333,7 +323,7 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     Serial.printf("❌ No llegó cuerpo en la respuesta (%d).\n", written);
     backendUnlock();
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
   if (sink.desbordo()) {
     Serial.printf("⚠️ La respuesta no entró en el buffer (%u bytes de %u); se corta.\n",
@@ -345,7 +335,7 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
     Serial.println("❌ La respuesta llegó vacía.");
     backendUnlock();
     setFaceMode(FACE_IDLE);
-    return false;
+    return;
   }
   inspectSavedResponse(responseBuffer, fileSize);
 
@@ -372,7 +362,6 @@ bool sendAudioAndPlayResponse(size_t recordedPcmBytes) {
   // que loop() y le robaba el procesador al decodificador justo en los primeros
   // segundos de la reproducción.
   backendUnlock();
-  return true;
 }
 
 bool retryPlayback() {

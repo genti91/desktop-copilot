@@ -7,11 +7,7 @@
 
 #include <Arduino.h>
 
-// Manda la grabacion al backend y arranca la reproduccion de la respuesta.
-// Devuelve true solo si el equipo efectivamente contesto: false si fallo la red
-// o si el backend descarto la grabacion por ruido (204). Quien llama lo usa para
-// decidir si abre la ventana de seguimiento o vuelve a esperar "Jarvis".
-bool sendAudioAndPlayResponse(size_t recordedPcmBytes);
+void sendAudioAndPlayResponse(size_t recordedPcmBytes);
 
 // Vuelve a arrancar la reproduccion del mismo archivo ya guardado, sin tocar la
 // red. Devuelve false si ya se reintento o si no se pudo reabrir.

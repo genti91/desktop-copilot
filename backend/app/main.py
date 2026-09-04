@@ -29,7 +29,6 @@ from .ota_sync import background_sync_loop, router as ota_sync_router
 from .pages import router as pages_router
 from .services import extract_and_save_data, process_meeting_storage
 from .state import sessions, state_memory
-from .transcription import es_ruido
 
 
 @asynccontextmanager
@@ -122,7 +121,6 @@ async def voice_assistant(
         )
 
     user_text = ""
-    hubo_transcripcion = False
     if groq:
         try:
             transcription = groq.audio.transcriptions.create(
@@ -131,22 +129,8 @@ async def voice_assistant(
                 language="es",
             )
             user_text = transcription.text.strip()
-            hubo_transcripcion = True
         except Exception as error:
             print(f"[Groq STT Error]: {error}")
-
-    # Antes de gastar el modelo y el TTS: si no le hablaron a él, no contesta.
-    #
-    # Se pide que la transcripción haya salido bien: un error de Groq también
-    # deja `user_text` vacío, pero ahí no sabemos qué se dijo y quedarse mudo
-    # esconde la falla. Eso sigue por el camino de siempre y contesta hablando.
-    #
-    # El 204 sale antes de tocar el historial a propósito. Guardar un
-    # "[Audio inaudible]" por cada ruido de la habitación no sólo hacía hablar
-    # al equipo solo: le ensuciaba el contexto de la conversación siguiente.
-    if hubo_transcripcion and es_ruido(user_text):
-        print(f"[STT] descartado por ruido: {user_text!r}")
-        return Response(status_code=204, headers={"X-Action": "NONE"})
 
     capabilities = "controlar las luces de su escritorio"
     notes_block = ""
