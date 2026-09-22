@@ -48,6 +48,22 @@ bool looksLikeIp(const String& host) {
   return true;
 }
 
+// El tailnet vive en 100.64.0.0/10. Una IP fuera de ese rango es de la LAN: se
+// llega por WiFi y no por el tunel, asi que no hay peer al que despertar.
+//
+// Se compara sobre el texto y no sobre el entero de microlink_parse_ip() para
+// no depender del orden de bytes que devuelva.
+bool esDelTailnet(const String& ip) {
+  const int primerPunto = ip.indexOf('.');
+  if (primerPunto <= 0) return false;
+  const int segundoPunto = ip.indexOf('.', primerPunto + 1);
+  if (segundoPunto <= 0) return false;
+
+  const long primero = ip.substring(0, primerPunto).toInt();
+  const long segundo = ip.substring(primerPunto + 1, segundoPunto).toInt();
+  return primero == 100 && segundo >= 64 && segundo <= 127;
+}
+
 void onStateChange(microlink_t* handle, microlink_state_t state, void* userData) {
   (void)userData;
   static const char* NAMES[] = {"inactivo",   "esperando Wi-Fi", "conectando", "registrando",
@@ -177,6 +193,15 @@ String tailnetResolve(const String& hostname) {
 
 void tailnetEnsurePeer(const String& ip, uint16_t port) {
   if (!tailnetConnected() || !looksLikeIp(ip)) return;
+
+  // Con el backend configurado por su IP de LAN, esto se llamaba con una
+  // direccion que no existe adentro del tunel: microlink_tcp_connect() se comia
+  // los PEER_WARM_TIMEOUT_MS enteros y recien despues el pedido salia por WiFi,
+  // que era el camino bueno desde el principio. Y como el fallo deja everWarmed
+  // en false, la espera se pagaba de nuevo en cada pedido: 15 s antes de mandar
+  // el audio de cada "Jarvis", y dos mas en el arranque.
+  if (!esDelTailnet(ip)) return;
+
   if (everWarmed && millis() - lastWarmMs < PEER_WARM_MS) return;
 
   uint32_t address = microlink_parse_ip(ip.c_str());

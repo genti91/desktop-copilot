@@ -83,7 +83,7 @@ void setup() {
   faceCanvas.setColorDepth(16);
   faceCanvas.createSprite(SCREEN_W, SCREEN_H);
   setFaceMode(FACE_IDLE);
-  pinMode(TOUCH_PIN, INPUT);
+  pinMode(TOUCH_PIN, INPUT_PULLDOWN);
 
   if (!LittleFS.begin(true)) {
     Serial.println("❌ Error al iniciar LittleFS");

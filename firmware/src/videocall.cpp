@@ -385,10 +385,10 @@ void runVideoCall() {
       Serial.println("📴 Wi-Fi caído.");
       break;
     }
-    if (millis() - callStart > MAX_CALL_MS) {
-      Serial.println("📴 Tope de duración de la llamada.");
-      break;
-    }
+    // if (millis() - callStart > MAX_CALL_MS) {
+    //   Serial.println("📴 Tope de duración de la llamada.");
+    //   break;
+    // }
     if (!gotFirstFrame && millis() - callStart > WAIT_PEER_MS) {
       Serial.println("📴 Nadie atendió.");
       break;
