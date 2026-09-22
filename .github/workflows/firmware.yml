@@ -39,8 +39,10 @@ jobs:
           path: |
             ~/.platformio
             ~/.cache/pip
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          # Cambiar el prefijo permite invalidar una caché de PlatformIO/SCons
+          # dañada sin depender de la interfaz de GitHub para borrarla.
+          key: pio-v2-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: pio-v2-${{ runner.os }}-
 
       - name: Instalar PlatformIO
         run: pip install --upgrade platformio
