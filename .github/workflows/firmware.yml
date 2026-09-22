@@ -45,10 +45,10 @@ jobs:
           restore-keys: pio-v2-${{ runner.os }}-
 
       - name: Instalar PlatformIO
-        # La plataforma pioarduino 55.03.311 todavía espera el SCons que
-        # acompaña a esa plataforma. PlatformIO Core reciente instala
-        # platformio/tool-scons 4.11.1, que ya no incluye FortranCommon.
-        run: pip install platformio==6.1.16
+        # pioarduino 55.03.311 requiere PlatformIO Core >=6.1.19. Se fija
+        # esta versión para evitar que un upgrade automático cambie también
+        # la versión de SCons usada durante el build.
+        run: pip install platformio==6.1.19
 
       - name: Compilar
         working-directory: firmware
