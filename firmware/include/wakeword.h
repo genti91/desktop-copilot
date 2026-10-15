@@ -15,6 +15,9 @@ bool startWakeWord();
 // true si el modelo cargó y las tareas están corriendo.
 bool wakeWordReady();
 
+// true mientras una activación por voz graba o espera que loop() envíe el audio.
+bool wakeWordInteractionInProgress();
+
 // Bytes de una grabación terminada esperando a que loop() la mande, o 0 si no
 // hay ninguna. La grabación vive en pcm_buffer, igual que la del sensor.
 size_t wakeWordCapturedBytes();

@@ -38,6 +38,7 @@ const char* const MICROLINK_TAGS[] = {"ml_coord",   "ml_wg_mgr", "ml_derp",  "ml
 microlink_t* tailnetLink = NULL;
 uint32_t lastWarmMs = 0;
 bool everWarmed = false;
+bool lanProbeAttempted = false;
 
 bool looksLikeIp(const String& host) {
   if (host.length() == 0) return false;
@@ -46,6 +47,15 @@ bool looksLikeIp(const String& host) {
     if (!isdigit(character) && character != '.') return false;
   }
   return true;
+}
+
+bool isTailnetIp(const String& ip) {
+  const int firstDot = ip.indexOf('.');
+  const int secondDot = ip.indexOf('.', firstDot + 1);
+  if (firstDot <= 0 || secondDot <= firstDot) return false;
+  return ip.substring(0, firstDot).toInt() == 100 &&
+         ip.substring(firstDot + 1, secondDot).toInt() >= 64 &&
+         ip.substring(firstDot + 1, secondDot).toInt() <= 127;
 }
 
 void onStateChange(microlink_t* handle, microlink_state_t state, void* userData) {
@@ -177,6 +187,12 @@ String tailnetResolve(const String& hostname) {
 
 void tailnetEnsurePeer(const String& ip, uint16_t port) {
   if (!tailnetConnected() || !looksLikeIp(ip)) return;
+  // El primer intento conserva la secuencia de arranque que funcionó en esta
+  // placa. Repetirlo para una IP LAN solo bloquea la red 15 s por pedido:
+  // ese destino se alcanza por Wi-Fi, nunca por el tunel.
+  const bool lanHost = !isTailnetIp(ip);
+  if (lanHost && lanProbeAttempted) return;
+  if (lanHost) lanProbeAttempted = true;
   if (everWarmed && millis() - lastWarmMs < PEER_WARM_MS) return;
 
   uint32_t address = microlink_parse_ip(ip.c_str());

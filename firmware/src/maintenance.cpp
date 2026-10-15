@@ -5,6 +5,7 @@
 #include "maintenance.h"
 #include "ota.h"
 #include "settings.h"
+#include "wakeword.h"
 
 namespace {
 
@@ -30,7 +31,8 @@ constexpr BaseType_t MAINTENANCE_CORE = 1;
 
 bool interactionInProgress() {
   // Mientras el usuario habla o el asistente contesta, la red queda para eso.
-  return digitalRead(TOUCH_PIN) == HIGH || (mp3 != NULL && mp3->isRunning());
+  return digitalRead(TOUCH_PIN) == HIGH || wakeWordInteractionInProgress() ||
+         (mp3 != NULL && mp3->isRunning());
 }
 
 void maintenanceTask(void* parameter) {

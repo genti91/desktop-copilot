@@ -235,6 +235,10 @@ bool wakeWordReady() {
   return tareasVivas;
 }
 
+bool wakeWordInteractionInProgress() {
+  return estado == Estado::GRABANDO || estado == Estado::LISTA;
+}
+
 size_t wakeWordCapturedBytes() {
   return estado == Estado::LISTA ? bytesGrabados : 0;
 }
