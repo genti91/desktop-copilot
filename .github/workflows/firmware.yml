@@ -50,6 +50,11 @@ jobs:
         # la versión de SCons usada durante el build.
         run: pip install platformio==6.1.19
 
+      - name: Usar espejo de Opus en GitHub
+        # ESP8266Audio trae Opus como submódulo desde GitLab, que devuelve
+        # 502/504 con frecuencia. El espejo oficial contiene el mismo commit.
+        run: git config --global url."https://github.com/xiph/opus.git".insteadOf "https://gitlab.xiph.org/xiph/opus.git"
+
       - name: Compilar
         working-directory: firmware
         run: pio run -e xiao_esp32s3
