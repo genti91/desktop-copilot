@@ -194,9 +194,10 @@ void initAudio() {
   // palabra dicha dos veces. ESP8266Audio no expone ese campo, asi que la
   // defensa es que el buffer no llegue a vaciarse.
   //
-  // 24 x 256 son ~256 ms de colchon por 24 KB de RAM interna, que sobran desde
-  // que los malloc grandes salen de PSRAM.
-  out->SetBuffers(24, 256 * 4);
+  // 12 x 256 dan ~128 ms de colchón por 12 KB de RAM interna. Con 24 buffers,
+  // el build OTA se quedaba sin memoria al inicializar I2S después de cargar
+  // el AFE y el assert de la librería reiniciaba el equipo.
+  out->SetBuffers(12, 256 * 4);
 
   out->SetPinout(I2S_BCLK, I2S_LRC, I2S_DIN);
   out->SetGain(0.5);
